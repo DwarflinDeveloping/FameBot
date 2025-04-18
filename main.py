@@ -1,5 +1,7 @@
 import json
 import os
+from typing import Tuple, Literal, Optional
+
 from dotenv import load_dotenv
 from pathlib import Path
 import pycountry
@@ -12,8 +14,21 @@ data_path = Path('data.json')
 flags_dir = Path('flags')
 
 COUNTRIES_NAME_LIST = [country.name for country in pycountry.countries]
-ALPHA_TO_NAME = {country.alpha_2: country.name for country in pycountry.countries}
-DATA_PRESET = {'counts': {country.alpha_2: 0 for country in pycountry.countries}}
+ALPHA2_TO_COUNTRY = {country.alpha_2: country.name for country in pycountry.countries}
+DATA_PRESET = {'counts': {country.alpha_2: {'votes': 0, 'points': 0} for country in pycountry.countries}}
+
+def alpha2_to_country(alpha2_str: str) -> str:
+    return ALPHA2_TO_COUNTRY[alpha2_str]
+
+def country_to_alpha2(country_name: str) -> str:
+    return list(ALPHA2_TO_COUNTRY.keys())[list(ALPHA2_TO_COUNTRY.values()).index(country_name)]
+
+RANK_SYMBOLS = {1: '🥇', 2: '🥈', 3: '🥉'}
+def get_rank_symbol(rank: int) -> str:
+    if rank in RANK_SYMBOLS:
+        return ' ' + RANK_SYMBOLS[rank]
+    else:
+        return ''
 
 def load_data():
     if data_path.exists():
@@ -27,61 +42,77 @@ class FameBot:
         self.tree = None
         self.bot = None
         self.country_imgs = None
-
-        self._data = None
-        _ = self.data  # initializing data
-        # self.load_flags()  # initializing flags
-
-    @property
-    def data(self):
-        if self._data is None:
-            self.data = load_data()  # loading data for the first time
-        return self._data
-
-    @data.setter
-    def data(self, value):
-        self._data = value
-        self.save_data()
-
-    """def load_flags(self):
-        self.country_imgs = {}
-        for flag_file in os.listdir(flags_dir):
-            country = flag_file.split('.')[0]
-            file_path = Path(flags_dir, flag_file)
-
-            self.country_imgs[country] = discord.File(file_path, filename=country + '.png')"""
+        self.data = load_data()
 
     def save_data(self):
         data_path.write_text(json.dumps(self.data, indent=2))
 
-    def run(self):
-        self.bot = discord.Bot(intents=discord.Intents.default(), command_prefix='&')
+    @property
+    def total_votes(self) -> int:
+        return sum(self.data['counts'][country]['votes'] for country in self.data['counts'])
 
+    def get_rank(self, alpha2: str, ctype: Literal['points', 'votes']) -> int:
+        values = [self.data['counts'][c][ctype] for c in self.data['counts']]
+        values.sort(reverse=True)
+        return values.index(self.data['counts'][alpha2][ctype]) + 1
+
+    async def eval_country(self, ctx, c_inp: str) -> Tuple[str, str] | None:
+        c_inp = c_inp.upper()
+        if c_inp in self.data['counts']:  # valid alpha2 code
+            return c_inp, alpha2_to_country(c_inp)
+
+        c_inp = c_inp.lower().capitalize()
+        try:
+            alpha2 = country_to_alpha2(c_inp)
+
+        except ValueError:
+            await ctx.respond(f'Unknown country {c_inp}! Please use a 2-letter code or the full name.\n'
+                              f'Example: *Germany*, *DE*')
+            return None
+
+        else:
+            return alpha2, alpha2_to_country(alpha2)  # valid country name converted to alpha2
+
+    def get_base_embed(self, title: str, error: bool = False, **kwargs) -> discord.Embed:
+        embed = discord.Embed(
+            title=title,
+            color=discord.Colour.red() if error else discord.Colour.blurple(),
+            **kwargs
+        )
+        embed.set_footer(
+            text=self.__class__.__name__,
+            icon_url='https://cdn.discordapp.com/avatars/1071362480347041802/ebd5ff4cadb4ab015f00c967d9f2852a?size=512'
+        )
+        return embed
+
+    def register_cmds(self):
         @self.bot.slash_command(
             name='cvote',
             description='Cast a vote for a country of your choice!'
         )
         async def vote_cmd(ctx, country: discord.Option(str)):
-            country = country.upper()
-            if country not in self.data['counts']:
-                await ctx.respond(f'Unknown country code {country}! Please use ISO 3166-1 Alpha-2.')
+            try:
+                alpha2, c_name = await self.eval_country(ctx, country)
+            except TypeError:
                 return
 
-            country_name = ALPHA_TO_NAME[country]
-            self.data['counts'][country] += 1
+            points_incr = self.total_votes
+            self.data['counts'][alpha2]['votes'] += 1
+            self.data['counts'][alpha2]['points'] += points_incr
             self.save_data()
 
-            embed = discord.Embed(
-                title='Vote successful!',
-                description=f'You have cast vote #{self.data['counts'][country]} for {country_name}.',
-                color=discord.Colour.blurple(),
-            )
-            embed.set_footer(text="FameBot", icon_url="https://cdn3.emoji.gg/emojis/9435-blurple-bot.png")
-            print(country)
-            embed.set_thumbnail(url=f'attachment://{country}.png')
+            vote_count, point_count = self.data['counts'][alpha2]['votes'], self.data['counts'][alpha2]['points']
+            vote_rank, points_rank = self.get_rank(alpha2, 'votes'), self.get_rank(alpha2, 'points')
+
+            embed = self.get_base_embed(title=f'Vote for {c_name} registered! (▲{points_incr} pt.)')
+            embed.add_field(name='Points',
+                            value=f'{point_count} (#{points_rank}{get_rank_symbol(points_rank)})', inline=True)
+            embed.add_field(name='Votes',
+                            value=f'{vote_count} (#{vote_rank}{get_rank_symbol(vote_rank)})', inline=True)
+            embed.set_thumbnail(url=f'attachment://{alpha2}.png')
             await ctx.respond(
                 embed=embed,
-                file=discord.File(Path(flags_dir, country+'.png'), filename=country+'.png')
+                file=discord.File(Path(flags_dir, alpha2 + '.png'), filename=alpha2 + '.png')
             )
 
         @self.bot.slash_command(
@@ -93,34 +124,47 @@ class FameBot:
             self.data = DATA_PRESET.copy()
             await ctx.respond('Database cleared! Hope you know what you are doing.')
 
-        @self.bot.slash_command(
-            name='cset',
+        country_cmds = discord.SlashCommandGroup('country', 'country-related commands')
+
+        @country_cmds.command(
+            name='set',
             description='Sets votes of a country to a specific amount'
         )
         @default_permissions(administrator=True)
-        async def cset_cmd(ctx, country: discord.Option(str), amount: discord.Option(int)):
-            country = country.upper()
-            if country not in self.data['counts']:
-                await ctx.respond(f'Unknown country code {country}! Please use ISO 3166-1 Alpha-2.')
+        async def cset_cmd(ctx,
+                           ctype: discord.Option(str, choices=['votes', 'points']),
+                           country: discord.Option(str),
+                           amount: discord.Option(int)):
+            try:
+                alpha2, c_name = await self.eval_country(ctx, country)
+            except TypeError:
                 return
 
-            self.data['counts'][country] = amount
-            self.save_data()
-            await ctx.respond(f'Votes for {ALPHA_TO_NAME[country]} ({country}) set to {amount}!')
+            if ctype not in ['votes', 'points']:
+                await ctx.respond('Unknown ctype! Use "votes" or "points".')
+                return
 
-        @self.bot.slash_command(
-            name='cclear',
+            self.data['counts'][alpha2][ctype] = amount
+            self.save_data()
+            await ctx.respond(f'{ctype.capitalize()} for {alpha2_to_country(alpha2)} ({alpha2}) set to {amount}!')
+
+        @country_cmds.command(
+            name='clear',
             description='Resets votes for a specific country'
         )
         @default_permissions(administrator=True)
         async def cclear_cmd(ctx, country: discord.Option(str)):
-            await cset_cmd(ctx, country, 0)
+            await cset_cmd(ctx, 'points', country, 0)
+            await cset_cmd(ctx, 'votes', country, 0)
 
+        self.bot.add_application_command(country_cmds)
+
+    def run(self):
+        self.bot = discord.Bot(intents=discord.Intents.default(), command_prefix='&')
+        self.register_cmds()
         self.bot.run(os.getenv('TOKEN'))
+        bot.save_data()  # failsafe for data loss
 
 if __name__ == '__main__':
     bot = FameBot()
-    try:
-        bot.run()
-    except KeyboardInterrupt:
-        bot.save_data()  # failsafe for data loss
+    bot.run()

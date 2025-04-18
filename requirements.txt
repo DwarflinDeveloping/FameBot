@@ -1,0 +1,4 @@
+pycountry~=24.6.1
+dotenv~=0.9.9
+python-dotenv~=1.1.0
+py-cord
