@@ -125,10 +125,7 @@ class FameBot:
         return list(sort_dict({c: data[c][ctype] for c in data}).keys())
 
     def get_rank(self, alpha2: str, ctype: Literal['points', 'votes'], recap_scope: str | None = None) -> int:
-        data = self.data['total'] if recap_scope is None else self.data['recap'][recap_scope]
-        values = [data[c][ctype] for c in data]
-        values.sort(reverse=True)
-        return values.index(data[alpha2][ctype]) + 1
+        return self.get_order(ctype, recap_scope).index(alpha2) + 1
 
     async def eval_country(self, ctx, c_inp: str) -> Tuple[str, str] | None:
         c_inp = c_inp.upper()
