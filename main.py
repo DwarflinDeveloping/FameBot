@@ -232,13 +232,13 @@ class FameBot:
                 vote_args = self.vote_args(alpha2, c_name, user)
                 new_resp = await interaction.respond(**vote_args)
                 self.wait_cooldown(user.id)
-                vote_args['view'].enable_btn()
+                vote_args['view'].set_again_state(True)
                 await new_resp.edit(view=vote_args['view'])
 
-            def enable_btn(self):
+            def set_again_state(self, value: bool):
                 for item in self.children:
                     if type(item) == discord.ui.Button and item.custom_id == 'again':
-                        item.disabled = False
+                        item.disabled = not value
                         break
 
         view = VoteView()
@@ -285,7 +285,11 @@ class FameBot:
             await ctx.respond(**vote_args)
 
             self.wait_cooldown(ctx.author.id)
-            vote_args['view'].enable_btn()
+            vote_args['view'].set_again_state(True)
+            await ctx.edit(view=vote_args['view'])
+
+            sleep(60)  # voting window expires after some time...
+            vote_args['view'].set_again_state(False)
             await ctx.edit(view=vote_args['view'])
 
         @self.bot.slash_command(
