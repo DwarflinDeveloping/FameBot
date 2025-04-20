@@ -3,7 +3,7 @@ from math import floor
 from pathlib import Path
 import dataclasses
 from time import time, sleep
-from typing import Dict, Self
+from typing import Dict, Self, Iterator, List
 from xml.etree.ElementTree import indent
 
 import discord
@@ -33,6 +33,24 @@ USER_DATA_PRESET = {
     'additional_xp': 0,
     'next_vote': None,
     'daily_claim': None
+}
+
+PROGRESSION_ROLES = {
+    0: 1363309917926064210,
+    30: 1363310545108996238,
+    60: 1363310802060447804,
+    100: 1363310895580709017,
+    130: 1363311104364773596,
+    160: 1363311311924101180,
+    200: 1363311794533437540,
+    250: 1363312217298305304,
+    300: 1363312348424568932,
+    375: 1363312436232323123,
+    450: 1363312587449569551,
+    525: 1363312813531070595,
+    600: 1363312962009301202,
+    800: 1363313105165095175,
+    1000: 1363313333511389296
 }
 
 @dataclasses.dataclass
@@ -101,6 +119,7 @@ class FameUser:
 
     def wait_cooldown(self) -> None:
         if self.next_vote:
+            print(self.next_vote, time(), self.next_vote - time())
             duration = max(0, self.next_vote - time())
         else:
             duration = 0
@@ -126,6 +145,13 @@ class FameUser:
         return self.data['country'][alpha2]
 
     @property
+    def roles(self) -> Iterator[int]:
+        for requirement in PROGRESSION_ROLES:
+            if self.leveling >= requirement:
+                yield PROGRESSION_ROLES[requirement]
+            break
+
+    @property
     def leveling_formatted(self) -> str:
         return f'**Lvl. {floor(self.leveling)}** ({floor((self.leveling%1)*100)}% progress)'
 
@@ -138,14 +164,20 @@ def load_data() -> dict:
 def save_data(value: dict) -> None:
     data_path.write_text(json.dumps(value, indent=2))
 
+def get_flag_path(alpha2: str):
+    return Path(flags_dir, alpha2 + '.png')
+
+def get_banner_path(alpha2: str):
+    return Path(banners_dir, alpha2 + '.jpg')
+
 def get_flag(alpha2: str) -> discord.File | None:
-    flag_path = Path(flags_dir, alpha2 + '.png')
+    flag_path = get_flag_path(alpha2)
     if not flag_path.exists():
         return None
     return discord.File(flag_path, filename=alpha2 + '.png')
 
 def get_banner(alpha2: str) -> discord.File | None:
-    banner_path = Path(banners_dir, alpha2 + '.jpg')
+    banner_path = get_banner_path(alpha2)
     if not banner_path.exists():
         return None
     return discord.File(banner_path, filename=alpha2 + '.jpg')

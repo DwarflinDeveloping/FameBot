@@ -1,5 +1,5 @@
 import enum
-
+from typing import Literal
 import pycountry
 from millify import millify as _millify
 import pypopulation
@@ -7,6 +7,7 @@ from pycountry_convert import country_alpha2_to_continent_code
 
 POINTS = 'points'
 VOTES = 'votes'
+CTYPES = Literal[POINTS, VOTES]
 
 def sort_dict(inp_dict: dict) -> dict:
     return dict(sorted(inp_dict.items(), key=lambda item: item[1], reverse=True))

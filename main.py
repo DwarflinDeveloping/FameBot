@@ -1,31 +1,33 @@
 import asyncio
-
-from data import FameUser, load_data, save_data, flags_dir, DATA_PRESET, get_flag, get_banner
+from data import FameUser, load_data, save_data, flags_dir, DATA_PRESET, get_flag, get_banner, get_flag_path, \
+    get_banner_path
 from utils import sort_dict, alpha2_to_country, country_to_alpha2, ALTERNATIVE_CNAMES, incr_symbol, \
     millify, get_rank_symbol, CONTINENT_CODE_TO_NAME, points_per_capita, country_to_continent, format_country_ranking, \
-    format_cname, POINTS, VOTES
+    format_cname, POINTS, VOTES, CTYPES
 
 import datetime
 import os
 from time import time
-from typing import Tuple, Literal, List, Iterator
 from dotenv import load_dotenv
 from pathlib import Path
-import discord
-from discord import default_permissions, ApplicationContext, Interaction, Button, User
+from discord import default_permissions, ApplicationContext, Interaction, Button, User, Guild, Member, Option, File, \
+    Embed, Colour, ButtonStyle, ui, Bot, Intents, SlashCommandGroup
+
+from typing import Tuple, List, Iterator
 
 class FameBot:
-    def __init__(self, cooldown: float = 3, daily_votes: int = 10, recap_scopes=None):
+    def __init__(self, cooldown: float = 5, daily_votes: int = 30, recap_scopes=None, upload_images: bool = False):
         if recap_scopes is None:
             self.recap_scopes = ['daily', 'weekly', 'seasonal']
         else:
             self.recap_scopes = recap_scopes
         self.cooldown = cooldown
         self.daily_votes = daily_votes
+        self.upload_images = upload_images
 
-        self.bot: discord.Bot | None = None
+        self.bot: Bot | None = None
         self.data = load_data()
-        self.user_data = {}
+        self.users_role_checked = []
 
     def save_data(self) -> None:
         save_data(self.data)
@@ -39,14 +41,14 @@ class FameBot:
         for user_id in self.data['users']:
             yield FameUser(self.data['users'][user_id], user_id)
 
-    def get_order(self, ctype: Literal[POINTS, VOTES], recap_scope: str | None = None) -> List[str]:
+    def get_order(self, ctype: CTYPES, recap_scope: str | None = None) -> List[str]:
         data = self.data['total'] if recap_scope is None else self.data['recap'][recap_scope]
         return list(sort_dict({c: data[c][ctype] for c in data}).keys())
 
-    def get_rank(self, alpha2: str, ctype: Literal[POINTS, VOTES], recap_scope: str | None = None) -> int:
+    def get_rank(self, alpha2: str, ctype: CTYPES, recap_scope: str | None = None) -> int:
         return self.get_order(ctype, recap_scope).index(alpha2) + 1
 
-    async def eval_country(self, ctx, c_inp: str) -> Tuple[str, str] | None:
+    async def eval_country(self, ctx: ApplicationContext, c_inp: str) -> Tuple[str, str] | None:
         c_inp = c_inp.upper()
         if c_inp in self.data['total']:  # valid alpha2 code
             return c_inp, alpha2_to_country(c_inp)
@@ -70,11 +72,11 @@ class FameBot:
             return alpha2, alpha2_to_country(alpha2)  # valid country name converted to alpha2
 
     @staticmethod
-    def get_base_embed(user: User, title: str, error: bool = False, **kwargs) -> discord.Embed:
-        embed = discord.Embed(
+    def get_base_embed(user: User, title: str, error: bool = False, **kwargs) -> Embed:
+        embed = Embed(
             title=title,
             timestamp=datetime.datetime.now(datetime.UTC),
-            color=discord.Colour.red() if error else discord.Colour.blurple(),
+            color=Colour.red() if error else Colour.blurple(),
             **kwargs
         )
         embed.set_footer(
@@ -123,10 +125,12 @@ class FameBot:
         return self.data['total'][alpha2][VOTES], self.data['total'][alpha2][POINTS], \
                self.get_rank(alpha2, VOTES), self.get_rank(alpha2, POINTS)
 
-    def vote_args(self, alpha2, c_name: str, user: User):
-        fame_user = FameUser.from_file(user.id)
+    def vote_args(self, alpha2, c_name: str, fame_user: FameUser, user: User):
         fame_user.update_next_vote(self.cooldown)
+        print(1, fame_user.next_vote)
         fame_user.save()
+
+        vote_args = {}
 
         points_incr = self.do_vote(FameUser.from_file(user.id), alpha2, 1)
         vote_count, point_count, vote_rank, points_rank = self.get_country_stats(alpha2)
@@ -139,14 +143,25 @@ class FameBot:
         embed.add_field(name='Votes',
                         value=f'{millify(vote_count)} (#{vote_rank}{get_rank_symbol(vote_rank)})', inline=True)
 
-        flag, banner = get_flag(alpha2), get_banner(alpha2)
-        if banner:
-            embed.set_image(url=f'attachment://{alpha2}.jpg')
+        print(2, fame_user.next_vote)
+        if self.upload_images:
+            if get_banner_path(alpha2).exists():
+                banner = get_banner(alpha2)
+                embed.set_image(url=f'attachment://{alpha2}.jpg')
+                vote_args['file'] = banner
+            else:
+                flag = get_flag(alpha2)
+                embed.set_image(url=f'attachment://{alpha2}.jpg')
+                vote_args['file'] = flag
         else:
-            embed.set_thumbnail(url=f'attachment://{alpha2}.png')
+            if get_banner_path(alpha2).exists():
+                embed.set_image(url=f'https://raw.githubusercontent.com/DwarflinDeveloping/FameBot/refs/heads/master/banners/{alpha2}.jpg')
+            else:
+                embed.set_thumbnail(url=f'https://raw.githubusercontent.com/DwarflinDeveloping/FameBot/refs/heads/master/flags/{alpha2}.png')
 
-        class VoteView(discord.ui.View):
-            @discord.ui.button(label='Vote again', style=discord.ButtonStyle.primary, custom_id='again',
+        print(3, fame_user.next_vote)
+        class VoteView(ui.View):
+            @ui.button(label='Vote again', style=ButtonStyle.primary, custom_id='again',
                                disabled=False if self.cooldown == 0 else True)
             async def button_callback(self2, button: Button, interaction: Interaction):
                 if interaction.user.id != user.id:
@@ -155,24 +170,31 @@ class FameBot:
 
                 button.disabled = True
                 await interaction.edit(view=view)
-                vote_args = self.vote_args(alpha2, c_name, user)
-                new_resp = await interaction.respond(**vote_args)
+
+                _vote_args = self.vote_args(alpha2, c_name, fame_user, user)
+                if interaction.user.id not in self.users_role_checked:
+                    await self.check_roles(interaction, fame_user)
+                new_resp = await interaction.respond(**_vote_args)
                 fame_user.wait_cooldown()
-                vote_args['view'].set_again_state(True)
-                await new_resp.edit(view=vote_args['view'])
+
+                _vote_args['view'].set_again_state(True)
+                await new_resp.edit(view=_vote_args['view'])
 
             def set_again_state(self, value: bool):
                 for item in self.children:
-                    if type(item) == discord.ui.Button and item.custom_id == 'again':
+                    if type(item) == ui.Button and item.custom_id == 'again':
                         item.disabled = not value
                         break
 
+        print(4, fame_user.next_vote)
         view = VoteView()
-        return {
+        vote_args = vote_args | {
             'embed': embed,
-            'file': banner if banner else flag,
             'view': view
         }
+
+        print(5, fame_user.next_vote)
+        return vote_args
 
     async def check_permissions(self, ctx: ApplicationContext, admin_only: bool) -> bool:
         if admin_only and ctx.user.id not in self.data['admins']:
@@ -185,10 +207,24 @@ class FameBot:
         await ctx.respond(embed=self.get_base_embed(ctx.author, 'Action failed', description=description, error=True), ephemeral=True)
         return False
 
+    async def check_roles(self, ctx: ApplicationContext | Interaction, fame_user: FameUser):
+        if type(ctx) == ApplicationContext:
+            user, guild, channel = ctx.author, ctx.guild, ctx.channel
+        else:
+            user, guild, channel = ctx.user, ctx.guild, ctx.channel
+        if type(user) == Member:  # only role checking on servers
+            for role_id in fame_user.roles:
+                role = guild.get_role(role_id)
+                if role not in user.roles:
+                    await user.add_roles(role)
+                    await channel.send(f'You have been granted the {role.mention} role!')
+
+        self.users_role_checked.append(user.id)
+
     def register_cmds(self):
-        country_cmds = discord.SlashCommandGroup('country', 'country-related commands')
-        top_cmds = discord.SlashCommandGroup('top', 'leaderboards')
-        user_cmds = discord.SlashCommandGroup('user', 'user-related commands')
+        country_cmds = SlashCommandGroup('country', 'country-related commands')
+        top_cmds = SlashCommandGroup('top', 'leaderboards')
+        user_cmds = SlashCommandGroup('user', 'user-related commands')
 
         @self.bot.slash_command(
             name='cvote',
@@ -198,7 +234,7 @@ class FameBot:
             name='vote',
             description='Cast a vote for a country of your choice!'
         )
-        async def vote_cmd(ctx: ApplicationContext, country: discord.Option(str)):
+        async def vote_cmd(ctx: ApplicationContext, country: Option(str)):
             if not await self.check_permissions(ctx, False):
                 return
             await ctx.defer()
@@ -218,7 +254,8 @@ class FameBot:
             except TypeError:
                 return
 
-            vote_args = self.vote_args(alpha2, c_name, ctx.author)
+            vote_args = self.vote_args(alpha2, c_name, user, ctx.author)
+            if ctx.author.id not in self.users_role_checked: await self.check_roles(ctx, user)
             await ctx.respond(**vote_args)
 
             user.wait_cooldown()
@@ -226,7 +263,7 @@ class FameBot:
             await ctx.edit(view=vote_args['view'])
 
             # sleep(60)  # voting window expires after some time...
-            await asyncio.sleep(10)
+            await asyncio.sleep(30)
             vote_args['view'].set_again_state(False)
             await ctx.edit(view=vote_args['view'])
 
@@ -247,9 +284,9 @@ class FameBot:
         )
         @default_permissions(administrator=True)
         async def cset_cmd(ctx: ApplicationContext,
-                           ctype: discord.Option(str, choices=[VOTES, POINTS]),
-                           country: discord.Option(str),
-                           amount: discord.Option(int)):
+                           ctype: Option(str, choices=[VOTES, POINTS]),
+                           country: Option(str),
+                           amount: Option(int)):
             if not await self.check_permissions(ctx, True):
                 return
             try:
@@ -270,7 +307,7 @@ class FameBot:
             description='Resets votes for a specific country'
         )
         @default_permissions(administrator=True)
-        async def cclear_cmd(ctx: ApplicationContext, country: discord.Option(str)):
+        async def cclear_cmd(ctx: ApplicationContext, country: Option(str)):
             if not await self.check_permissions(ctx, True):
                 return
             await cset_cmd(ctx, POINTS, country, 0)
@@ -280,7 +317,7 @@ class FameBot:
             name='info',
             description='Information about a country'
         )
-        async def cinfo_cmd(ctx: ApplicationContext, country: discord.Option(str)):
+        async def cinfo_cmd(ctx: ApplicationContext, country: Option(str)):
             if not await self.check_permissions(ctx, False):
                 return
             try:
@@ -322,14 +359,18 @@ class FameBot:
             vote_values = sort_dict(vote_values)
 
             point_str, vote_str = str(), str()
-            for alpha2 in point_values:
+            for i, alpha2 in enumerate(point_values, start=1):
+                if i > 20:
+                    break
                 c_name = alpha2_to_country(alpha2)
                 point_count = self.data['total'][alpha2][POINTS]
                 point_rank = self.get_rank(alpha2, POINTS)
                 if point_count == 0: continue
                 point_str += format_country_ranking(format_cname(alpha2, c_name), point_rank, point_count, POINTS) + '\n'
 
-            for alpha2 in vote_values:
+            for i, alpha2 in enumerate(vote_values, start=1):
+                if i > 20:
+                    break
                 c_name = alpha2_to_country(alpha2)
                 vote_count = self.data['total'][alpha2][VOTES]
                 vote_rank = self.get_rank(alpha2, VOTES)
@@ -376,7 +417,7 @@ class FameBot:
             name='daily',
             description='Give a daily bonus to a country of your choice!'
         )
-        async def daily_cmd(ctx: ApplicationContext, country: discord.Option(str)):
+        async def daily_cmd(ctx: ApplicationContext, country: Option(str)):
             if not await self.check_permissions(ctx, False):
                 return
 
@@ -397,6 +438,7 @@ class FameBot:
 
             fame_user = FameUser.from_file(ctx.author.id)
             points_incr = self.do_vote(fame_user, alpha2, self.daily_votes)
+            if ctx.author.id not in self.users_role_checked: await self.check_roles(ctx, fame_user)
             self.save_data()
 
             vote_count, point_count, vote_rank, points_rank = self.get_country_stats(alpha2)
@@ -412,14 +454,14 @@ class FameBot:
                             value=f'{millify(vote_count)} (#{vote_rank}{get_rank_symbol(vote_rank)})', inline=True)
             embed.set_thumbnail(url=f'attachment://{alpha2}.png')
 
-            await ctx.respond(embed=embed, file=discord.File(Path(flags_dir, alpha2 + '.png'), filename=alpha2 + '.png'))
+            await ctx.respond(embed=embed, file=File(Path(flags_dir, alpha2 + '.png'), filename=alpha2 + '.png'))
 
         @self.bot.slash_command(
             name='maintenance',
             description='Toggle maintainance mode'
         )
         @default_permissions(administrator=True)
-        async def daily_cmd(ctx: ApplicationContext, value: discord.Option(bool)):
+        async def daily_cmd(ctx: ApplicationContext, value: Option(bool)):
             if not await self.check_permissions(ctx, True):
                 return
             self.data['maintenance'] = value
@@ -428,7 +470,7 @@ class FameBot:
             name='recap',
             description='Generates a recap for a given time frame!'
         )
-        async def recap_cmd(ctx: ApplicationContext, scope: discord.Option(str, choices=self.recap_scopes)):
+        async def recap_cmd(ctx: ApplicationContext, scope: Option(str, choices=self.recap_scopes)):
             if not await self.check_permissions(ctx, False):
                 return
 
@@ -463,7 +505,7 @@ class FameBot:
             name='info',
             description='Displays information on a user'
         )
-        async def uinfo_cmd(ctx: ApplicationContext, user: discord.User):
+        async def uinfo_cmd(ctx: ApplicationContext, user: User):
             if not await self.check_permissions(ctx, False):
                 return
 
@@ -473,7 +515,7 @@ class FameBot:
             embed.add_field(name='Leveling', value=fame_user.leveling_formatted, inline=False)
             embed.add_field(name='Total votes', value=str(fame_user.total_votes), inline=True)
             embed.add_field(name='Total points', value=str(fame_user.total_points), inline=True)
-            embed.set_thumbnail(url=ctx.author.avatar.url)
+            embed.set_thumbnail(url=user.avatar.url)
             await ctx.respond(embed=embed)
 
         self.bot.add_application_command(country_cmds)
@@ -488,10 +530,11 @@ class FameBot:
             await uinfo_cmd(ctx, ctx.user)
 
     def run(self):
-        self.bot = discord.Bot(intents=discord.Intents.default())
+        self.bot = Bot(intents=Intents.default())
         self.register_cmds()
         self.bot.run(os.getenv('TOKEN'))
         bot.save_data()  # failsafe to prevent data loss
+
 
 if __name__ == '__main__':
     load_dotenv()
