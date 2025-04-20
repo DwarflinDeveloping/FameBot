@@ -1,29 +1,31 @@
 import asyncio
 
-from data import load_data, save_data, flags_dir, DATA_PRESET, get_flag, get_banner
+from data import FameUser, load_data, save_data, flags_dir, DATA_PRESET, get_flag, get_banner
 from utils import sort_dict, alpha2_to_country, country_to_alpha2, ALTERNATIVE_CNAMES, incr_symbol, \
     millify, get_rank_symbol, CONTINENT_CODE_TO_NAME, points_per_capita, country_to_continent, format_country_ranking, \
     format_cname
 
 import datetime
-import json
 import os
-from time import time, sleep
-from typing import Tuple, Literal, List
+from time import time
+from typing import Tuple, Literal, List, Iterator
 from dotenv import load_dotenv
 from pathlib import Path
-import pycountry
 import discord
 from discord import default_permissions, ApplicationContext, Interaction, Button, User
 
 class FameBot:
-    def __init__(self, cooldown: float = 3, daily_votes: int = 10):
+    def __init__(self, cooldown: float = 3, daily_votes: int = 10, recap_scopes=None):
+        if recap_scopes is None:
+            self.recap_scopes = ['daily', 'weekly', 'monthly']
+        else:
+            self.recap_scopes = recap_scopes
         self.cooldown = cooldown
         self.daily_votes = daily_votes
 
         self.bot: discord.Bot | None = None
         self.data = load_data()
-        self.user_cooldowns = {}
+        self.user_data = {}
 
     def save_data(self) -> None:
         save_data(self.data)
@@ -31,6 +33,11 @@ class FameBot:
     @property
     def total_votes(self) -> int:
         return sum(self.data['total'][country]['votes'] for country in self.data['total'])
+
+    @property
+    def users(self) -> Iterator[FameUser]:
+        for user_id in self.data['users']:
+            yield FameUser(self.data['users'][user_id], user_id)
 
     def get_order(self, ctype: Literal['points', 'votes'], recap_scope: str | None = None) -> List[str]:
         data = self.data['total'] if recap_scope is None else self.data['recap'][recap_scope]
@@ -76,36 +83,36 @@ class FameBot:
         )
         return embed
 
-    def wait_cooldown(self, user_id: int):
-        if user_id in self.user_cooldowns:
-            next_vote = self.user_cooldowns[user_id]
-            duration = max(0, next_vote - time())
-        else:
-            duration = 0
-        sleep(duration)
-
-    def calc_incr(self, votes_count: int) -> int:
+    def calc_incr_legacy(self, votes_count: int) -> int:
+        # old way of calculating point increments
         return sum([self.total_votes+i-1 for i in range(votes_count)])
 
     def update_recap_ranks(self, prev_order: Tuple[List[str], List[str]], new_order: Tuple[List[str], List[str]]) -> None:
-        for scope in self.data['recap']:
+        for scope in self.recap_scopes:
             for alpha2 in self.data['recap'][scope]:
                 p_prev, v_prev = prev_order[0].index(alpha2), prev_order[1].index(alpha2)
                 p_new, v_new = new_order[0].index(alpha2), new_order[1].index(alpha2)
                 self.data['recap'][scope][alpha2]['dpos_points'] += p_prev - p_new
                 self.data['recap'][scope][alpha2]['dpos_votes'] += v_prev - v_new
 
-    def do_vote(self, alpha2: str, votes_count: int) -> int:
+    def do_vote(self, user: FameUser, alpha2: str, votes_count: int) -> int:
         prev_order = (self.get_order('points'), self.get_order('votes'))
 
         self.data['total'][alpha2]['votes'] += votes_count
-        points_incr = self.calc_incr(votes_count)
+        user.total_votes += votes_count
+        user.data['country'][alpha2]['votes'] += votes_count
+
+        # points_incr = self.calc_incr(votes_count)
+        points_incr = user.points_per_vote * votes_count
         self.data['total'][alpha2]['points'] += points_incr
+        user.total_points += points_incr
+        user.data['country'][alpha2]['points'] += points_incr
+        user.save()
 
         new_order = (self.get_order('points'), self.get_order('votes'))
         self.update_recap_ranks(prev_order, new_order)
 
-        for scope in self.data['recap']:
+        for scope in self.recap_scopes:
             self.data['recap'][scope][alpha2]['votes'] += votes_count
             self.data['recap'][scope][alpha2]['points'] += points_incr
 
@@ -117,8 +124,11 @@ class FameBot:
                self.get_rank(alpha2, 'votes'), self.get_rank(alpha2, 'points')
 
     def vote_args(self, alpha2, c_name: str, user: User):
-        self.user_cooldowns[user.id] = time() + self.cooldown
-        points_incr = self.do_vote(alpha2, 1)
+        fame_user = FameUser.from_file(user.id)
+        fame_user.update_next_vote(self.cooldown)
+        fame_user.save()
+
+        points_incr = self.do_vote(FameUser.from_file(user.id), alpha2, 1)
         vote_count, point_count, vote_rank, points_rank = self.get_country_stats(alpha2)
 
         embed = self.get_base_embed(
@@ -147,7 +157,7 @@ class FameBot:
                 await interaction.edit(view=view)
                 vote_args = self.vote_args(alpha2, c_name, user)
                 new_resp = await interaction.respond(**vote_args)
-                self.wait_cooldown(user.id)
+                fame_user.wait_cooldown()
                 vote_args['view'].set_again_state(True)
                 await new_resp.edit(view=vote_args['view'])
 
@@ -177,7 +187,8 @@ class FameBot:
 
     def register_cmds(self):
         country_cmds = discord.SlashCommandGroup('country', 'country-related commands')
-        top_cmds = discord.SlashCommandGroup('top', 'leaderboard for all countries')
+        top_cmds = discord.SlashCommandGroup('top', 'leaderboards')
+        user_cmds = discord.SlashCommandGroup('user', 'user-related commands')
 
         @self.bot.slash_command(
             name='cvote',
@@ -191,7 +202,17 @@ class FameBot:
             if not await self.check_permissions(ctx, False):
                 return
             await ctx.defer()
-            self.wait_cooldown(ctx.user.id)
+            user = FameUser.from_file(ctx.author.id)
+            if not user.vote_ready:
+                await ctx.respond(
+                    embed=self.get_base_embed(
+                        ctx.author, 'On cooldown!',
+                        description=f'Wait a few seconds before you can vote again.',
+                        error=True),
+                    ephemeral=True
+                )
+                return
+
             try:
                 alpha2, c_name = await self.eval_country(ctx, country)
             except TypeError:
@@ -200,7 +221,7 @@ class FameBot:
             vote_args = self.vote_args(alpha2, c_name, ctx.author)
             await ctx.respond(**vote_args)
 
-            self.wait_cooldown(ctx.author.id)
+            user.wait_cooldown()
             vote_args['view'].set_again_state(True)
             await ctx.edit(view=vote_args['view'])
 
@@ -358,8 +379,10 @@ class FameBot:
         async def daily_cmd(ctx: ApplicationContext, country: discord.Option(str)):
             if not await self.check_permissions(ctx, False):
                 return
-            if str(ctx.author.id) in self.data['daily_claims']:
-                next_claim = self.data['daily_claims'][str(ctx.author.id)] + 60*60*20
+
+            fame_user = FameUser.from_file(ctx.user.id)
+            if fame_user.daily_claim:
+                next_claim = fame_user.daily_claim + 60*60*20
                 dt = next_claim - time()
                 if dt > 0:
                     await ctx.respond(
@@ -372,10 +395,13 @@ class FameBot:
             except TypeError:
                 return
 
-            points_incr = self.do_vote(alpha2, self.daily_votes)
-            vote_count, point_count, vote_rank, points_rank = self.get_country_stats(alpha2)
-            self.data['daily_claims'][str(ctx.author.id)] = time()
+            fame_user = FameUser.from_file(ctx.author.id)
+            points_incr = self.do_vote(fame_user, alpha2, self.daily_votes)
             self.save_data()
+
+            vote_count, point_count, vote_rank, points_rank = self.get_country_stats(alpha2)
+            fame_user.update_daily_claim()
+            fame_user.save()
 
             embed = self.get_base_embed(
                 ctx.author, title=f'{self.daily_votes} daily votes registered for {format_cname(alpha2, c_name)}! ({incr_symbol(points_incr)}{millify(points_incr)} pt.)'
@@ -402,7 +428,7 @@ class FameBot:
             name='recap',
             description='Generates a recap for a given time frame!'
         )
-        async def recap_cmd(ctx: ApplicationContext, scope: discord.Option(str, choices=['daily', 'weekly', 'monthly'])):
+        async def recap_cmd(ctx: ApplicationContext, scope: discord.Option(str, choices=self.recap_scopes)):
             if not await self.check_permissions(ctx, False):
                 return
 
@@ -433,8 +459,33 @@ class FameBot:
             embed.add_field(name='Votes', value=vote_str, inline=True)
             await ctx.respond(embed=embed)
 
+        @user_cmds.command(
+            name='info',
+            description='Displays information on a user'
+        )
+        async def uinfo_cmd(ctx: ApplicationContext, user: discord.User):
+            if not await self.check_permissions(ctx, False):
+                return
+
+            fame_user = FameUser.from_file(user.id)
+
+            embed = self.get_base_embed(ctx.author, title=f'{user.name}\'s Profile')
+            embed.add_field(name='Leveling', value=fame_user.leveling_formatted, inline=False)
+            embed.add_field(name='Total votes', value=str(fame_user.total_votes), inline=True)
+            embed.add_field(name='Total points', value=str(fame_user.total_points), inline=True)
+            embed.set_thumbnail(url=ctx.author.avatar.url)
+            await ctx.respond(embed=embed)
+
         self.bot.add_application_command(country_cmds)
         self.bot.add_application_command(top_cmds)
+        self.bot.add_application_command(user_cmds)
+
+        @self.bot.slash_command(
+            name='me',
+            description='View your own profile!'
+        )
+        async def me_cmd(ctx: ApplicationContext):
+            await uinfo_cmd(ctx, ctx.user)
 
     def run(self):
         self.bot = discord.Bot(intents=discord.Intents.default())

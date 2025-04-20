@@ -1,5 +1,10 @@
 import json
+from math import floor
 from pathlib import Path
+import dataclasses
+from time import time, sleep
+from typing import Dict, Self
+from xml.etree.ElementTree import indent
 
 import discord
 import pycountry
@@ -7,15 +12,122 @@ import pycountry
 data_path = Path('data.json')
 flags_dir = Path('flags')
 banners_dir = Path('banners')
+users_dir = Path('users')
+for path in flags_dir, banners_dir, users_dir:
+    path.mkdir(exist_ok=True)
+
+COUNTRY_DATA_PRESET = {country.alpha_2: {'votes': 0, 'points': 0} for country in pycountry.countries}
 
 DATA_PRESET = {
-    'total': {country.alpha_2: {'votes': 0, 'points': 0} for country in pycountry.countries},
+    'total': COUNTRY_DATA_PRESET,
     'recap': {scope: {country.alpha_2: {'votes': 0, 'points': 0, 'dpos_votes': 0, 'dpos_points': 0} for country in pycountry.countries} for scope in ['daily', 'weekly', 'monthly']},
     'daily_claims': {},
     'users': {},
     'maintenance': False,
     'admins': [784473264755834880]
 }
+
+USER_DATA_PRESET = {
+    'total': {'votes': 0, 'points': 0},
+    'country': {country.alpha_2: {'votes': 0, 'points': 0} for country in pycountry.countries},
+    'additional_xp': 0,
+    'next_vote': None,
+    'daily_claim': None
+}
+
+@dataclasses.dataclass
+class FameUser:
+    data: dict
+    user_id: int
+
+    @classmethod
+    def from_file(cls, user_id: int) -> Self:
+        file_path = Path(users_dir, f'{user_id}.json')
+        if file_path.is_file():
+            user_data = json.loads(file_path.read_text())
+        else:
+            user_data = USER_DATA_PRESET
+        return cls(user_data, user_id)
+
+    @property
+    def file_path(self) -> Path:
+        return Path(users_dir, f'{self.user_id}.json')
+
+    def save(self):
+        self.file_path.write_text(json.dumps(self.data, indent=2))
+
+    @property
+    def total_votes(self) -> int:
+        return self.data['total']['votes']
+
+    @total_votes.setter
+    def total_votes(self, value: int) -> None:
+        self.data['total']['votes'] = value
+
+    @property
+    def total_points(self) -> int:
+        return self.data['total']['points']
+
+    @total_points.setter
+    def total_points(self, value: int) -> None:
+        self.data['total']['points'] = value
+
+    @property
+    def additional_xp(self) -> int:
+        return self.data['additional_xp']
+
+    @additional_xp.setter
+    def additional_xp(self, value: int) -> None:
+        self.data['additional_xp'] = value
+
+    @property
+    def daily_claim(self) -> int | None:
+        return self.data['daily_claim']
+
+    @daily_claim.setter
+    def daily_claim(self, value: int | None) -> None:
+        self.data['daily_claim'] = value
+
+    def update_daily_claim(self):
+        self.daily_claim = time()
+
+    @property
+    def next_vote(self) -> int | None:
+        return self.data['next_vote']
+
+    @property
+    def vote_ready(self):
+        return self.next_vote - time() <= 0
+
+    def wait_cooldown(self) -> None:
+        if self.next_vote:
+            duration = max(0, self.next_vote - time())
+        else:
+            duration = 0
+
+        sleep(duration)
+
+    @next_vote.setter
+    def next_vote(self, value: int | None) -> None:
+        self.data['next_vote'] = value
+
+    def update_next_vote(self, cooldown: float):
+        self.next_vote = time() + cooldown
+
+    @property
+    def leveling(self) -> float:
+        return 1 + (self.total_votes * 10 + self.additional_xp) / 100
+
+    @property
+    def points_per_vote(self) -> int:
+        return floor(self.leveling)
+
+    def get_country(self, alpha2: str) -> Dict[str, int]:
+        return self.data['country'][alpha2]
+
+    @property
+    def leveling_formatted(self) -> str:
+        return f'**Lvl. {floor(self.leveling)}** ({floor((self.leveling%1)*100)}% progress)'
 
 def load_data() -> dict:
     if data_path.exists():
