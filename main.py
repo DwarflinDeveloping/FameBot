@@ -1,108 +1,19 @@
 import asyncio
+
+from data import load_data, save_data, flags_dir, DATA_PRESET
+from utils import sort_dict, alpha2_to_country, country_to_alpha2, ALTERNATIVE_CNAMES, incr_symbol, \
+    millify, get_rank_symbol, CONTINENT_CODE_TO_NAME, points_per_capita, country_to_continent, format_country_ranking
+
 import datetime
 import json
 import os
 from time import time, sleep
-from typing import Tuple, Literal, Optional, List
-from millify import millify as _millify
-import pypopulation
+from typing import Tuple, Literal, List
 from dotenv import load_dotenv
 from pathlib import Path
 import pycountry
-import pycountry_convert
 import discord
 from discord import default_permissions, ApplicationContext, Interaction, Button, User
-from pycountry_convert import country_alpha2_to_continent_code
-
-load_dotenv()
-
-data_path = Path('data.json')
-flags_dir = Path('flags')
-
-def sort_dict(inp_dict: dict) -> dict:
-    return dict(sorted(inp_dict.items(), key=lambda item: item[1], reverse=True))
-
-COUNTRIES_NAME_LIST = [country.name for country in pycountry.countries]
-ALPHA2_TO_COUNTRY = {country.alpha_2: country.name for country in pycountry.countries}
-
-ALTERNATIVE_CNAMES = {
-    'Turkey': 'TR'
-}
-
-def alpha2_to_country(alpha2: str) -> str:
-    return ALPHA2_TO_COUNTRY[alpha2]
-
-def country_to_alpha2(country_name: str) -> str:
-    return list(ALPHA2_TO_COUNTRY.keys())[list(ALPHA2_TO_COUNTRY.values()).index(country_name)]
-
-CONTINENT_CORRECTIONS = {
-    'GE': 'EU',
-    'VA': 'EU',
-    'AQ': 'AN',
-    'TF': 'AN',
-    'HM': 'AN',
-    'EH': 'AF',
-    'PN': 'OC',
-    'SX': 'NA',
-    'TL': 'AS',
-    'UM': 'OC'
-}
-def country_to_continent(alpha2: str) -> str:
-    if alpha2 in CONTINENT_CORRECTIONS:
-        return CONTINENT_CORRECTIONS[alpha2]
-    else:
-        return country_alpha2_to_continent_code(alpha2)
-
-CONTINENT_CODE_TO_NAME = {
-    'EU': 'Europe',
-    'AS': 'Asia',
-    'NA': 'North America',
-    'SA': 'South America',
-    'OC': 'Australasia',
-    'AF': 'Africa',
-    'AN': 'Antarctic Territories'
-}
-
-def points_per_capita(alpha2: str, point_count: int) -> float:
-    pop = pypopulation.get_population_a2(alpha2)
-    if pop is None:
-        pop = 50
-    return round(point_count / pop, 5)
-
-def millify(n: float):
-    return _millify(n, precision=3)
-
-RANK_SYMBOLS = {1: '🥇', 2: '🥈', 3: '🥉'}
-def get_rank_symbol(rank: int) -> str:
-    if rank in RANK_SYMBOLS:
-        return ' ' + RANK_SYMBOLS[rank]
-    else:
-        return ''
-
-def format_country_ranking(c_name: str, rank: int, count: int, ctype: str, dpos: int | None = None, recap: bool = False):
-    rank_symbol = get_rank_symbol(rank).lstrip()
-    rank_str = rank_symbol if rank_symbol else f'\u200b {rank}.'
-    dpos_str = f' {incr_symbol(dpos)}{abs(dpos)}' if dpos else ''
-    amount_prefix = '+' if recap else ''
-    amount_suffix = ' pt.' if ctype == 'points' else ' vt.' if ctype == 'votes' else ''
-    return f'{rank_str} {c_name} ({amount_prefix}{count}{amount_suffix}){dpos_str}'
-
-def incr_symbol(incr: int) -> str:
-    symbol = '▼' if incr < 0 else '▲' if incr > 0 else ''
-    return symbol
-
-DATA_PRESET = {
-    'total': {country.alpha_2: {'votes': 0, 'points': 0} for country in pycountry.countries},
-    'recap': {scope: {country.alpha_2: {'votes': 0, 'points': 0, 'dpos_votes': 0, 'dpos_points': 0} for country in pycountry.countries} for scope in ['daily', 'weekly', 'monthly']},
-    'daily_claims': {},
-    'maintenance': False,
-    'admins': [784473264755834880]
-}
-def load_data() -> dict:
-    if data_path.exists():
-        return json.loads(data_path.read_text())
-    else:
-        return DATA_PRESET
 
 class FameBot:
     def __init__(self, cooldown: float = 3, daily_votes: int = 10):
@@ -113,8 +24,8 @@ class FameBot:
         self.data = load_data()
         self.user_cooldowns = {}
 
-    def save_data(self):
-        data_path.write_text(json.dumps(self.data, indent=2))
+    def save_data(self) -> None:
+        save_data(self.data)
 
     @property
     def total_votes(self) -> int:
@@ -288,7 +199,8 @@ class FameBot:
             vote_args['view'].set_again_state(True)
             await ctx.edit(view=vote_args['view'])
 
-            sleep(60)  # voting window expires after some time...
+            # sleep(60)  # voting window expires after some time...
+            await asyncio.sleep(10)
             vote_args['view'].set_again_state(False)
             await ctx.edit(view=vote_args['view'])
 
@@ -526,5 +438,6 @@ class FameBot:
         bot.save_data()  # failsafe for data loss
 
 if __name__ == '__main__':
+    load_dotenv()
     bot = FameBot()
     bot.run()
