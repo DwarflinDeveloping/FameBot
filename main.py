@@ -50,8 +50,8 @@ class FameBot:
     def get_rank(self, alpha2: str, ctype: CTYPES, recap_scope: str | None = None) -> int:
         return self.get_order(ctype, recap_scope).index(alpha2) + 1
 
-    async def eval_country(self, ctx: ApplicationContext, c_inp: str) -> Tuple[str, str] | None:
-        c_inp = c_inp.upper()
+    async def eval_country(self, ctx: ApplicationContext, inp: str) -> Tuple[str, str] | None:
+        c_inp = inp.upper()
         if c_inp in self.data['total']:  # valid alpha2 code
             return c_inp, alpha2_to_country(c_inp)
 
@@ -65,7 +65,7 @@ class FameBot:
         try:
             alpha2 = country_to_alpha2(c_inp)
         except ValueError:
-            embed = self.get_base_embed(ctx.author,f'Unknown country {c_inp}!', description=' Please use a 2-letter code or the full name.', error=True)
+            embed = self.get_base_embed(ctx.author,f'Unknown country {inp}!', description=' Please use a 2-letter code or the full name.', error=True)
             embed.add_field(name='Example:', value='*Germany* or *DE*')
             await ctx.respond(embed=embed, ephemeral=True)
             return None
@@ -129,7 +129,6 @@ class FameBot:
 
     def vote_args(self, alpha2, c_name: str, fame_user: FameUser, user: User):
         fame_user.update_next_vote(self.cooldown)
-        print(1, fame_user.next_vote)
         fame_user.save()
 
         vote_args = {}
@@ -145,7 +144,6 @@ class FameBot:
         embed.add_field(name='Votes',
                         value=f'{millify(vote_count)} (#{vote_rank}{get_rank_symbol(vote_rank)})', inline=True)
 
-        print(2, fame_user.next_vote)
         if self.upload_images:
             if get_banner_path(alpha2).exists():
                 banner = get_banner(alpha2)
@@ -161,7 +159,6 @@ class FameBot:
             else:
                 embed.set_thumbnail(url=f'https://raw.githubusercontent.com/DwarflinDeveloping/FameBot/refs/heads/master/flags/{alpha2}.png')
 
-        print(3, fame_user.next_vote)
         class VoteView(ui.View):
             @ui.button(label='Vote again', style=ButtonStyle.primary, custom_id='again',
                                disabled=False if self.cooldown == 0 else True)
@@ -170,14 +167,24 @@ class FameBot:
                     await interaction.respond(embed=self.get_base_embed(user, f'This is {user.name}\'s voting window! Make your own one using /cvote', error=True), ephemeral=True)
                     return
 
+                _fame_user = FameUser.from_file(fame_user.user_id)
+                if _fame_user.next_vote and not _fame_user.vote_ready:
+                    rem = _fame_user.remaining_cooldown
+                    embed = self.get_base_embed(
+                        interaction.user, 'Slow down!',
+                        description=f'Voting is on cooldown for {ceil(rem)} second{'s' if rem > 1 else ''}.',
+                        error=True)
+                    await interaction.respond(embed=embed, ephemeral=True)
+                    return
+
                 button.disabled = True
                 await interaction.edit(view=view)
 
-                _vote_args = self.vote_args(alpha2, c_name, fame_user, user)
+                _vote_args = self.vote_args(alpha2, c_name, _fame_user, user)
                 if interaction.user.id not in self.users_role_checked:
                     await self.check_roles(interaction, fame_user)
                 new_resp = await interaction.respond(**_vote_args)
-                await fame_user.wait_cooldown()
+                await _fame_user.wait_cooldown()
 
                 _vote_args['view'].set_again_state(True)
                 await new_resp.edit(view=_vote_args['view'])
@@ -188,14 +195,12 @@ class FameBot:
                         item.disabled = not value
                         break
 
-        print(4, fame_user.next_vote)
         view = VoteView()
         vote_args = vote_args | {
             'embed': embed,
             'view': view
         }
 
-        print(5, fame_user.next_vote)
         return vote_args
 
     async def check_permissions(self, ctx: ApplicationContext, admin_only: bool) -> bool:
@@ -527,11 +532,24 @@ class FameBot:
 
         @self.bot.slash_command(
             name='help',
-            description='Usage help for the FAME Bot'
+            description='Help for how to use the FAME Bot'
         )
         async def help_cmd(ctx: ApplicationContext):
-            embed = self.get_base_embed(ctx.author, title=f'Usage help')
-            await ctx.respond(embeds=[embed], ephemeral=True)
+            embed1 = Embed(title='How to vote?', description='Use the **/cvote** command with your country\'s name or 2-letter code.\n')
+            embed1.add_field(name='Example', value='*Germany* or *DE*')
+            embed1.set_image(url='https://raw.githubusercontent.com/DwarflinDeveloping/FameBot/refs/heads/master/images/1.png')
+            embed2 = Embed(title='How to view my profile?', description='Use the **/me** command to view your own profile.\n')
+            embed2.set_image(url='https://raw.githubusercontent.com/DwarflinDeveloping/FameBot/refs/heads/master/images/2.png')
+            embed3 = Embed(title='What other commands are there?',
+                           description='- */country info* - Information about a country\n'
+                                       '- */daily* - Give 10 daily votes to a country\n'
+                                       '- */user info* - Gives information on another user\n'
+                                       '- */top country* - Lists the top 20 countries\n'
+                                       '- */top continents* - Lists stats for all continents\n'
+                                       '- */recap* - Generate a recap for a specific time period')
+            embed3.add_field(name='Still questions? Found a bug?', value='We are happy to help you in the FAME discord!\n')
+            embed4 = Embed(title='Click here to join', url='https://discord.com/invite/VP8yFSYJWw')
+            await ctx.respond(embeds=(embed1, embed2, embed3, embed4), ephemeral=True)
 
         self.bot.add_application_command(country_cmds)
         self.bot.add_application_command(top_cmds)

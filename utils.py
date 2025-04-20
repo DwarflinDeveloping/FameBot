@@ -1,6 +1,7 @@
 import enum
 from typing import Literal
 import pycountry
+import country_converter
 from millify import millify as _millify
 import pypopulation
 from pycountry_convert import country_alpha2_to_continent_code
@@ -12,18 +13,21 @@ CTYPES = Literal[POINTS, VOTES]
 def sort_dict(inp_dict: dict) -> dict:
     return dict(sorted(inp_dict.items(), key=lambda item: item[1], reverse=True))
 
-COUNTRIES_NAME_LIST = [country.name for country in pycountry.countries]
+COUNTRIES_NAME_LIST = [country.name.lower() for country in pycountry.countries]
 ALPHA2_TO_COUNTRY = {country.alpha_2: country.name for country in pycountry.countries}
 
 ALTERNATIVE_CNAMES = {
-    'Turkey': 'TR'
+    'Turkey': 'TR',
+    'Russia': 'RU',
+    'Bosnia': 'BA',
+    'BES Islands': 'BQ'
 }
 
 def alpha2_to_country(alpha2: str) -> str:
     return ALPHA2_TO_COUNTRY[alpha2]
 
-def country_to_alpha2(country_name: str) -> str:
-    return list(ALPHA2_TO_COUNTRY.keys())[list(ALPHA2_TO_COUNTRY.values()).index(country_name)]
+def country_to_alpha2(*country_names: str) -> str:
+    return country_converter.convert(names=country_names, to='ISO2')
 
 CONTINENT_CORRECTIONS = {
     'GE': 'EU',
@@ -78,8 +82,15 @@ def format_country_ranking(c_name: str, rank: int, count: int, ctype: str, dpos:
     amount_suffix = ' pt.' if ctype == POINTS else ' vt.' if ctype == VOTES else ''
     return f'{rank_str} {c_name} ({amount_prefix}{count_str}{amount_suffix}){dpos_str}'
 
+CNAME_IMPROVEMENTS = {
+    'Russian Federation': 'Russia',
+    'Bonaire, Sint Eustatius and Saba': 'BES Islands'
+}
+def improve_cname(cname: str):
+    return CNAME_IMPROVEMENTS[cname] if cname in CNAME_IMPROVEMENTS else cname
+
 def format_cname(alpha2: str, cname: str) -> str:
-    return f'{cname} :flag_{alpha2.lower()}:'
+    return f'{improve_cname(cname)} :flag_{alpha2.lower()}:'
 
 def incr_symbol(incr: int) -> str:
     symbol = '▼' if incr < 0 else '▲' if incr > 0 else ''
