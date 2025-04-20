@@ -1,8 +1,9 @@
 import asyncio
 
-from data import load_data, save_data, flags_dir, DATA_PRESET
+from data import load_data, save_data, flags_dir, DATA_PRESET, get_flag, get_banner
 from utils import sort_dict, alpha2_to_country, country_to_alpha2, ALTERNATIVE_CNAMES, incr_symbol, \
-    millify, get_rank_symbol, CONTINENT_CODE_TO_NAME, points_per_capita, country_to_continent, format_country_ranking
+    millify, get_rank_symbol, CONTINENT_CODE_TO_NAME, points_per_capita, country_to_continent, format_country_ranking, \
+    format_cname
 
 import datetime
 import json
@@ -91,7 +92,6 @@ class FameBot:
             for alpha2 in self.data['recap'][scope]:
                 p_prev, v_prev = prev_order[0].index(alpha2), prev_order[1].index(alpha2)
                 p_new, v_new = new_order[0].index(alpha2), new_order[1].index(alpha2)
-                if alpha2.lower() == 'de' and scope == 'daily': print(prev_order[1].index('DE'), new_order[1].index('DE'), p_new, p_prev)
                 self.data['recap'][scope][alpha2]['dpos_points'] += p_prev - p_new
                 self.data['recap'][scope][alpha2]['dpos_votes'] += v_prev - v_new
 
@@ -116,19 +116,24 @@ class FameBot:
         return self.data['total'][alpha2]['votes'], self.data['total'][alpha2]['points'], \
                self.get_rank(alpha2, 'votes'), self.get_rank(alpha2, 'points')
 
-    def vote_args(self, alpha2, c_name, user: User):
+    def vote_args(self, alpha2, c_name: str, user: User):
         self.user_cooldowns[user.id] = time() + self.cooldown
         points_incr = self.do_vote(alpha2, 1)
         vote_count, point_count, vote_rank, points_rank = self.get_country_stats(alpha2)
 
         embed = self.get_base_embed(
-            user, title=f'Vote for {c_name} registered! ({incr_symbol(points_incr)}{millify(points_incr)} pt.)'
+            user, title=f'Vote for {format_cname(alpha2, c_name)} registered! ({incr_symbol(points_incr)}{millify(points_incr)} pt.)'
         )
         embed.add_field(name='Points',
                         value=f'{millify(point_count)} (#{points_rank}{get_rank_symbol(points_rank)})', inline=True)
         embed.add_field(name='Votes',
                         value=f'{millify(vote_count)} (#{vote_rank}{get_rank_symbol(vote_rank)})', inline=True)
-        embed.set_thumbnail(url=f'attachment://{alpha2}.png')
+
+        flag, banner = get_flag(alpha2), get_banner(alpha2)
+        if banner:
+            embed.set_image(url=f'attachment://{alpha2}.jpg')
+        else:
+            embed.set_thumbnail(url=f'attachment://{alpha2}.png')
 
         class VoteView(discord.ui.View):
             @discord.ui.button(label='Vote again', style=discord.ButtonStyle.primary, custom_id='again',
@@ -155,7 +160,7 @@ class FameBot:
         view = VoteView()
         return {
             'embed': embed,
-            'file': discord.File(Path(flags_dir, alpha2 + '.png'), filename=alpha2 + '.png'),
+            'file': banner if banner else flag,
             'view': view
         }
 
@@ -265,7 +270,7 @@ class FameBot:
             vote_count, point_count = self.data['total'][alpha2]['votes'], self.data['total'][alpha2]['points']
             vote_rank, points_rank = self.get_rank(alpha2, 'votes'), self.get_rank(alpha2, 'points')
 
-            embed = self.get_base_embed(ctx.author, title=c_name)
+            embed = self.get_base_embed(ctx.author, title=format_cname(alpha2, c_name))
             embed.add_field(name='Points',
                             value=f'{millify(point_count)} (#{points_rank}{get_rank_symbol(points_rank)})', inline=True)
             embed.add_field(name='Votes',
@@ -279,7 +284,7 @@ class FameBot:
             embed.set_thumbnail(url=f'attachment://{alpha2}.png')
             await ctx.respond(
                 embed=embed,
-                file=discord.File(Path(flags_dir, alpha2 + '.png'), filename=alpha2 + '.png')
+                file=get_flag(alpha2)
             )
 
         @top_cmds.command(
@@ -301,14 +306,14 @@ class FameBot:
                 point_count = self.data['total'][alpha2]['points']
                 point_rank = self.get_rank(alpha2, 'points')
                 if point_count == 0: continue
-                point_str += format_country_ranking(c_name, point_rank, point_count, 'points') + '\n'
+                point_str += format_country_ranking(format_cname(alpha2, c_name), point_rank, point_count, 'points') + '\n'
 
             for alpha2 in vote_values:
                 c_name = alpha2_to_country(alpha2)
                 vote_count = self.data['total'][alpha2]['votes']
                 vote_rank = self.get_rank(alpha2, 'votes')
                 if vote_count == 0: continue
-                vote_str += format_country_ranking(c_name, vote_rank, vote_count, 'votes') + '\n'
+                vote_str += format_country_ranking(format_cname(alpha2, c_name), vote_rank, vote_count, 'votes') + '\n'
 
             embed = self.get_base_embed(ctx.author, title='Top countries')
             embed.add_field(name='Points', value=point_str, inline=True)
@@ -373,7 +378,7 @@ class FameBot:
             self.save_data()
 
             embed = self.get_base_embed(
-                ctx.author, title=f'{self.daily_votes} daily votes {c_name} registered for {c_name}! ({incr_symbol(points_incr)}{millify(points_incr)} pt.)'
+                ctx.author, title=f'{self.daily_votes} daily votes registered for {format_cname(alpha2, c_name)}! ({incr_symbol(points_incr)}{millify(points_incr)} pt.)'
             )
             embed.add_field(name='Points',
                             value=f'{millify(point_count)} (#{points_rank}{get_rank_symbol(points_rank)})', inline=True)
@@ -432,10 +437,10 @@ class FameBot:
         self.bot.add_application_command(top_cmds)
 
     def run(self):
-        self.bot = discord.Bot(intents=discord.Intents.default(), command_prefix='&')
+        self.bot = discord.Bot(intents=discord.Intents.default())
         self.register_cmds()
         self.bot.run(os.getenv('TOKEN'))
-        bot.save_data()  # failsafe for data loss
+        bot.save_data()  # failsafe to prevent data loss
 
 if __name__ == '__main__':
     load_dotenv()

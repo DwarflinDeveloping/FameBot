@@ -72,6 +72,9 @@ def format_country_ranking(c_name: str, rank: int, count: int, ctype: str, dpos:
     amount_suffix = ' pt.' if ctype == 'points' else ' vt.' if ctype == 'votes' else ''
     return f'{rank_str} {c_name} ({amount_prefix}{count}{amount_suffix}){dpos_str}'
 
+def format_cname(alpha2: str, cname: str) -> str:
+    return f'{cname} :flag_{alpha2.lower()}:'
+
 def incr_symbol(incr: int) -> str:
     symbol = '▼' if incr < 0 else '▲' if incr > 0 else ''
     return symbol
