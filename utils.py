@@ -1,8 +1,12 @@
+import enum
+
 import pycountry
 from millify import millify as _millify
 import pypopulation
 from pycountry_convert import country_alpha2_to_continent_code
 
+POINTS = 'points'
+VOTES = 'votes'
 
 def sort_dict(inp_dict: dict) -> dict:
     return dict(sorted(inp_dict.items(), key=lambda item: item[1], reverse=True))
@@ -69,8 +73,9 @@ def format_country_ranking(c_name: str, rank: int, count: int, ctype: str, dpos:
     rank_str = rank_symbol if rank_symbol else f'\u200b {rank}.'
     dpos_str = f' {incr_symbol(dpos)}{abs(dpos)}' if dpos else ''
     amount_prefix = '+' if recap else ''
-    amount_suffix = ' pt.' if ctype == 'points' else ' vt.' if ctype == 'votes' else ''
-    return f'{rank_str} {c_name} ({amount_prefix}{count}{amount_suffix}){dpos_str}'
+    count_str = millify(count) if ctype == POINTS else str(count)
+    amount_suffix = ' pt.' if ctype == POINTS else ' vt.' if ctype == VOTES else ''
+    return f'{rank_str} {c_name} ({amount_prefix}{count_str}{amount_suffix}){dpos_str}'
 
 def format_cname(alpha2: str, cname: str) -> str:
     return f'{cname} :flag_{alpha2.lower()}:'

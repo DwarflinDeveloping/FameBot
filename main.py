@@ -3,7 +3,7 @@ import asyncio
 from data import FameUser, load_data, save_data, flags_dir, DATA_PRESET, get_flag, get_banner
 from utils import sort_dict, alpha2_to_country, country_to_alpha2, ALTERNATIVE_CNAMES, incr_symbol, \
     millify, get_rank_symbol, CONTINENT_CODE_TO_NAME, points_per_capita, country_to_continent, format_country_ranking, \
-    format_cname
+    format_cname, POINTS, VOTES
 
 import datetime
 import os
@@ -17,7 +17,7 @@ from discord import default_permissions, ApplicationContext, Interaction, Button
 class FameBot:
     def __init__(self, cooldown: float = 3, daily_votes: int = 10, recap_scopes=None):
         if recap_scopes is None:
-            self.recap_scopes = ['daily', 'weekly', 'monthly']
+            self.recap_scopes = ['daily', 'weekly', 'seasonal']
         else:
             self.recap_scopes = recap_scopes
         self.cooldown = cooldown
@@ -32,18 +32,18 @@ class FameBot:
 
     @property
     def total_votes(self) -> int:
-        return sum(self.data['total'][country]['votes'] for country in self.data['total'])
+        return sum(self.data['total'][country][VOTES] for country in self.data['total'])
 
     @property
     def users(self) -> Iterator[FameUser]:
         for user_id in self.data['users']:
             yield FameUser(self.data['users'][user_id], user_id)
 
-    def get_order(self, ctype: Literal['points', 'votes'], recap_scope: str | None = None) -> List[str]:
+    def get_order(self, ctype: Literal[POINTS, VOTES], recap_scope: str | None = None) -> List[str]:
         data = self.data['total'] if recap_scope is None else self.data['recap'][recap_scope]
         return list(sort_dict({c: data[c][ctype] for c in data}).keys())
 
-    def get_rank(self, alpha2: str, ctype: Literal['points', 'votes'], recap_scope: str | None = None) -> int:
+    def get_rank(self, alpha2: str, ctype: Literal[POINTS, VOTES], recap_scope: str | None = None) -> int:
         return self.get_order(ctype, recap_scope).index(alpha2) + 1
 
     async def eval_country(self, ctx, c_inp: str) -> Tuple[str, str] | None:
@@ -96,32 +96,32 @@ class FameBot:
                 self.data['recap'][scope][alpha2]['dpos_votes'] += v_prev - v_new
 
     def do_vote(self, user: FameUser, alpha2: str, votes_count: int) -> int:
-        prev_order = (self.get_order('points'), self.get_order('votes'))
+        prev_order = (self.get_order(POINTS), self.get_order(VOTES))
 
-        self.data['total'][alpha2]['votes'] += votes_count
+        self.data['total'][alpha2][VOTES] += votes_count
         user.total_votes += votes_count
-        user.data['country'][alpha2]['votes'] += votes_count
+        user.data['country'][alpha2][VOTES] += votes_count
 
         # points_incr = self.calc_incr(votes_count)
         points_incr = user.points_per_vote * votes_count
-        self.data['total'][alpha2]['points'] += points_incr
+        self.data['total'][alpha2][POINTS] += points_incr
         user.total_points += points_incr
-        user.data['country'][alpha2]['points'] += points_incr
+        user.data['country'][alpha2][POINTS] += points_incr
         user.save()
 
-        new_order = (self.get_order('points'), self.get_order('votes'))
+        new_order = (self.get_order(POINTS), self.get_order(VOTES))
         self.update_recap_ranks(prev_order, new_order)
 
         for scope in self.recap_scopes:
-            self.data['recap'][scope][alpha2]['votes'] += votes_count
-            self.data['recap'][scope][alpha2]['points'] += points_incr
+            self.data['recap'][scope][alpha2][VOTES] += votes_count
+            self.data['recap'][scope][alpha2][POINTS] += points_incr
 
         self.save_data()
         return points_incr
 
     def get_country_stats(self, alpha2: str) -> Tuple[int, int, int, int]:
-        return self.data['total'][alpha2]['votes'], self.data['total'][alpha2]['points'], \
-               self.get_rank(alpha2, 'votes'), self.get_rank(alpha2, 'points')
+        return self.data['total'][alpha2][VOTES], self.data['total'][alpha2][POINTS], \
+               self.get_rank(alpha2, VOTES), self.get_rank(alpha2, POINTS)
 
     def vote_args(self, alpha2, c_name: str, user: User):
         fame_user = FameUser.from_file(user.id)
@@ -247,7 +247,7 @@ class FameBot:
         )
         @default_permissions(administrator=True)
         async def cset_cmd(ctx: ApplicationContext,
-                           ctype: discord.Option(str, choices=['votes', 'points']),
+                           ctype: discord.Option(str, choices=[VOTES, POINTS]),
                            country: discord.Option(str),
                            amount: discord.Option(int)):
             if not await self.check_permissions(ctx, True):
@@ -257,7 +257,7 @@ class FameBot:
             except TypeError:
                 return
 
-            if ctype not in ['votes', 'points']:
+            if ctype not in [VOTES, POINTS]:
                 await ctx.respond(embed=self.get_base_embed(ctx.author, 'Unknown ctype!', desccription='Use "votes" or "points".'), ephemeral=True)
                 return
 
@@ -273,8 +273,8 @@ class FameBot:
         async def cclear_cmd(ctx: ApplicationContext, country: discord.Option(str)):
             if not await self.check_permissions(ctx, True):
                 return
-            await cset_cmd(ctx, 'points', country, 0)
-            await cset_cmd(ctx, 'votes', country, 0)
+            await cset_cmd(ctx, POINTS, country, 0)
+            await cset_cmd(ctx, VOTES, country, 0)
 
         @country_cmds.command(
             name='info',
@@ -288,8 +288,8 @@ class FameBot:
             except TypeError:
                 return
 
-            vote_count, point_count = self.data['total'][alpha2]['votes'], self.data['total'][alpha2]['points']
-            vote_rank, points_rank = self.get_rank(alpha2, 'votes'), self.get_rank(alpha2, 'points')
+            vote_count, point_count = self.data['total'][alpha2][VOTES], self.data['total'][alpha2][POINTS]
+            vote_rank, points_rank = self.get_rank(alpha2, VOTES), self.get_rank(alpha2, POINTS)
 
             embed = self.get_base_embed(ctx.author, title=format_cname(alpha2, c_name))
             embed.add_field(name='Points',
@@ -316,25 +316,25 @@ class FameBot:
             if not await self.check_permissions(ctx, False):
                 return
 
-            point_values = {c: self.data['total'][c]['points'] for c in self.data['total']}
+            point_values = {c: self.data['total'][c][POINTS] for c in self.data['total']}
             point_values = sort_dict(point_values)
-            vote_values = {c: self.data['total'][c]['votes'] for c in self.data['total']}
+            vote_values = {c: self.data['total'][c][VOTES] for c in self.data['total']}
             vote_values = sort_dict(vote_values)
 
             point_str, vote_str = str(), str()
             for alpha2 in point_values:
                 c_name = alpha2_to_country(alpha2)
-                point_count = self.data['total'][alpha2]['points']
-                point_rank = self.get_rank(alpha2, 'points')
+                point_count = self.data['total'][alpha2][POINTS]
+                point_rank = self.get_rank(alpha2, POINTS)
                 if point_count == 0: continue
-                point_str += format_country_ranking(format_cname(alpha2, c_name), point_rank, point_count, 'points') + '\n'
+                point_str += format_country_ranking(format_cname(alpha2, c_name), point_rank, point_count, POINTS) + '\n'
 
             for alpha2 in vote_values:
                 c_name = alpha2_to_country(alpha2)
-                vote_count = self.data['total'][alpha2]['votes']
-                vote_rank = self.get_rank(alpha2, 'votes')
+                vote_count = self.data['total'][alpha2][VOTES]
+                vote_rank = self.get_rank(alpha2, VOTES)
                 if vote_count == 0: continue
-                vote_str += format_country_ranking(format_cname(alpha2, c_name), vote_rank, vote_count, 'votes') + '\n'
+                vote_str += format_country_ranking(format_cname(alpha2, c_name), vote_rank, vote_count, VOTES) + '\n'
 
             embed = self.get_base_embed(ctx.author, title='Top countries')
             embed.add_field(name='Points', value=point_str, inline=True)
@@ -358,13 +358,13 @@ class FameBot:
                 if continent not in vote_values:
                     vote_values[continent] = 0
 
-                point_values[continent] += self.data['total'][alpha2]['points']
-                vote_values[continent] += self.data['total'][alpha2]['votes']
+                point_values[continent] += self.data['total'][alpha2][POINTS]
+                vote_values[continent] += self.data['total'][alpha2][VOTES]
 
             point_values, vote_values = sort_dict(point_values), sort_dict(vote_values)
-            point_str = '\n'.join([format_country_ranking(CONTINENT_CODE_TO_NAME[con], n, point_values[con], 'points') \
+            point_str = '\n'.join([format_country_ranking(CONTINENT_CODE_TO_NAME[con], n, point_values[con], POINTS) \
                                    for n, con in enumerate(point_values, 1)])
-            vote_str = '\n'.join([format_country_ranking(CONTINENT_CODE_TO_NAME[con], n, vote_values[con], 'votes') \
+            vote_str = '\n'.join([format_country_ranking(CONTINENT_CODE_TO_NAME[con], n, vote_values[con], VOTES) \
                                   for n, con in enumerate(vote_values, 1)])
 
             embed = self.get_base_embed(ctx.author, title='Top continents')
@@ -432,27 +432,27 @@ class FameBot:
             if not await self.check_permissions(ctx, False):
                 return
 
-            point_values = {c: self.data['recap'][scope][c]['points'] for c in self.data['recap'][scope]}
+            point_values = {c: self.data['recap'][scope][c][POINTS] for c in self.data['recap'][scope]}
             point_values = sort_dict(point_values)
-            vote_values = {c: self.data['recap'][scope][c]['votes'] for c in self.data['recap'][scope]}
+            vote_values = {c: self.data['recap'][scope][c][VOTES] for c in self.data['recap'][scope]}
             vote_values = sort_dict(vote_values)
 
             point_str, vote_str = str(), str()
             for alpha2 in point_values:
                 c_name = alpha2_to_country(alpha2)
                 c_data = self.data['recap'][scope][alpha2]
-                point_count, point_dpos = c_data['points'], c_data['dpos_points']
-                point_rank = self.get_rank(alpha2, 'points', scope)
+                point_count, point_dpos = c_data[POINTS], c_data['dpos_points']
+                point_rank = self.get_rank(alpha2, POINTS, scope)
                 if point_count == 0: continue
-                point_str += format_country_ranking(c_name, point_rank, point_count, 'points', point_dpos, True) + '\n'
+                point_str += format_country_ranking(c_name, point_rank, point_count, POINTS, point_dpos, True) + '\n'
 
             for alpha2 in vote_values:
                 c_name = alpha2_to_country(alpha2)
                 c_data = self.data['recap'][scope][alpha2]
-                vote_count, vote_dpos = c_data['votes'], c_data['dpos_votes']
-                vote_rank = self.get_rank(alpha2, 'votes', scope)
+                vote_count, vote_dpos = c_data[VOTES], c_data['dpos_votes']
+                vote_rank = self.get_rank(alpha2, VOTES, scope)
                 if vote_count == 0: continue
-                vote_str += format_country_ranking(c_name, vote_rank, vote_count, 'votes', vote_dpos, True) + '\n'
+                vote_str += format_country_ranking(c_name, vote_rank, vote_count, VOTES, vote_dpos, True) + '\n'
 
             embed = self.get_base_embed(ctx.author, title=f'Top {scope.lower()} countries')
             embed.add_field(name='Points', value=point_str, inline=True)
