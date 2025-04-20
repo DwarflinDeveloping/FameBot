@@ -1,4 +1,6 @@
 import asyncio
+from math import ceil
+
 from data import FameUser, load_data, save_data, flags_dir, DATA_PRESET, get_flag, get_banner, get_flag_path, \
     get_banner_path
 from utils import sort_dict, alpha2_to_country, country_to_alpha2, ALTERNATIVE_CNAMES, incr_symbol, \
@@ -175,7 +177,7 @@ class FameBot:
                 if interaction.user.id not in self.users_role_checked:
                     await self.check_roles(interaction, fame_user)
                 new_resp = await interaction.respond(**_vote_args)
-                fame_user.wait_cooldown()
+                await fame_user.wait_cooldown()
 
                 _vote_args['view'].set_again_state(True)
                 await new_resp.edit(view=_vote_args['view'])
@@ -237,16 +239,14 @@ class FameBot:
         async def vote_cmd(ctx: ApplicationContext, country: Option(str)):
             if not await self.check_permissions(ctx, False):
                 return
-            await ctx.defer()
             user = FameUser.from_file(ctx.author.id)
-            if not user.vote_ready:
-                await ctx.respond(
-                    embed=self.get_base_embed(
-                        ctx.author, 'On cooldown!',
-                        description=f'Wait a few seconds before you can vote again.',
-                        error=True),
-                    ephemeral=True
-                )
+            if user.next_vote and not user.vote_ready:
+                rem = user.remaining_cooldown
+                embed = self.get_base_embed(
+                        ctx.author, 'Slow down!',
+                        description=f'Voting is on cooldown for {ceil(rem)} second{'s' if rem>1 else ''}.',
+                        error=True)
+                await ctx.respond(embed=embed, ephemeral=True)
                 return
 
             try:
@@ -258,7 +258,7 @@ class FameBot:
             if ctx.author.id not in self.users_role_checked: await self.check_roles(ctx, user)
             await ctx.respond(**vote_args)
 
-            user.wait_cooldown()
+            await user.wait_cooldown()
             vote_args['view'].set_again_state(True)
             await ctx.edit(view=vote_args['view'])
 
@@ -518,16 +518,24 @@ class FameBot:
             embed.set_thumbnail(url=user.avatar.url)
             await ctx.respond(embed=embed)
 
-        self.bot.add_application_command(country_cmds)
-        self.bot.add_application_command(top_cmds)
-        self.bot.add_application_command(user_cmds)
-
         @self.bot.slash_command(
             name='me',
             description='View your own profile!'
         )
         async def me_cmd(ctx: ApplicationContext):
             await uinfo_cmd(ctx, ctx.user)
+
+        @self.bot.slash_command(
+            name='help',
+            description='Usage help for the FAME Bot'
+        )
+        async def help_cmd(ctx: ApplicationContext):
+            embed = self.get_base_embed(ctx.author, title=f'Usage help')
+            await ctx.respond(embeds=[embed], ephemeral=True)
+
+        self.bot.add_application_command(country_cmds)
+        self.bot.add_application_command(top_cmds)
+        self.bot.add_application_command(user_cmds)
 
     def run(self):
         self.bot = Bot(intents=Intents.default())

@@ -1,3 +1,4 @@
+import asyncio
 import json
 from math import floor
 from pathlib import Path
@@ -13,7 +14,8 @@ data_path = Path('data.json')
 flags_dir = Path('flags')
 banners_dir = Path('banners')
 users_dir = Path('users')
-for path in flags_dir, banners_dir, users_dir:
+images_dir = Path('users')
+for path in flags_dir, banners_dir, users_dir, images_dir:
     path.mkdir(exist_ok=True)
 
 COUNTRY_DATA_PRESET = {country.alpha_2: {'votes': 0, 'points': 0} for country in pycountry.countries}
@@ -117,14 +119,13 @@ class FameUser:
     def vote_ready(self):
         return self.next_vote - time() <= 0
 
-    def wait_cooldown(self) -> None:
-        if self.next_vote:
-            print(self.next_vote, time(), self.next_vote - time())
-            duration = max(0, self.next_vote - time())
-        else:
-            duration = 0
+    @property
+    def remaining_cooldown(self) -> float:
+        return max(0, self.next_vote - time())
 
-        sleep(duration)
+    async def wait_cooldown(self) -> None:
+        duration = self.remaining_cooldown if self.next_vote else 0
+        await asyncio.sleep(duration)
 
     @next_vote.setter
     def next_vote(self, value: int | None) -> None:
