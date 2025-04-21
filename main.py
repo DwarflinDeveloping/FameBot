@@ -15,7 +15,8 @@ from pathlib import Path
 from discord import default_permissions, ApplicationContext, Interaction, Button, User, Guild, Member, Option, File, \
     Embed, Colour, ButtonStyle, ui, Bot, Intents, SlashCommandGroup
 
-from typing import Tuple, List, Iterator
+from typing import Tuple, List, Iterator, Dict
+
 
 class FameBot:
     def __init__(self, cooldown: float = 5, daily_votes: int = 30, recap_scopes=None, upload_images: bool = False):
@@ -30,6 +31,7 @@ class FameBot:
         self.bot: Bot | None = None
         self.data = load_data()
         self.users_role_checked = []
+        self.loaded_users: Dict[int, FameUser] = {}
 
     def save_data(self) -> None:
         save_data(self.data)
@@ -72,6 +74,14 @@ class FameBot:
 
         else:
             return alpha2, alpha2_to_country(alpha2)  # valid country name converted to alpha2
+
+    def get_user(self, user: User | Member) -> FameUser:
+        if user.id in self.loaded_users:
+            return self.loaded_users[user.id]
+
+        fame_user = FameUser.from_file(user.id)
+        self.loaded_users[user.id] = fame_user
+        return fame_user
 
     @staticmethod
     def get_base_embed(user: User, title: str, error: bool = False, **kwargs) -> Embed:
@@ -133,7 +143,7 @@ class FameBot:
 
         vote_args = {}
 
-        points_incr = self.do_vote(FameUser.from_file(user.id), alpha2, 1)
+        points_incr = self.do_vote(self.get_user(user), alpha2, 1)
         vote_count, point_count, vote_rank, points_rank = self.get_country_stats(alpha2)
 
         embed = self.get_base_embed(
@@ -167,7 +177,7 @@ class FameBot:
                     await interaction.respond(embed=self.get_base_embed(user, f'This is {user.name}\'s voting window! Make your own one using /cvote', error=True), ephemeral=True)
                     return
 
-                _fame_user = FameUser.from_file(fame_user.user_id)
+                _fame_user = self.get_user(interaction.user)
                 if _fame_user.next_vote and not _fame_user.vote_ready:
                     rem = _fame_user.remaining_cooldown
                     embed = self.get_base_embed(
@@ -246,7 +256,7 @@ class FameBot:
         async def vote_cmd(ctx: ApplicationContext, country: Option(str)):
             if not await self.check_permissions(ctx, False):
                 return
-            user = FameUser.from_file(ctx.author.id)
+            user = self.get_user(ctx.author)
             if user.next_vote and not user.vote_ready:
                 rem = user.remaining_cooldown
                 embed = self.get_base_embed(
@@ -428,7 +438,7 @@ class FameBot:
             if not await self.check_permissions(ctx, False):
                 return
 
-            fame_user = FameUser.from_file(ctx.user.id)
+            fame_user = self.get_user(ctx.user)
             if fame_user.daily_claim:
                 next_claim = fame_user.daily_claim + 60*60*20
                 dt = next_claim - time()
@@ -443,7 +453,7 @@ class FameBot:
             except TypeError:
                 return
 
-            fame_user = FameUser.from_file(ctx.author.id)
+            fame_user = self.get_user(ctx.author)
             points_incr = self.do_vote(fame_user, alpha2, self.daily_votes)
             if ctx.author.id not in self.users_role_checked: await self.check_roles(ctx, fame_user)
             self.save_data()
@@ -516,7 +526,7 @@ class FameBot:
             if not await self.check_permissions(ctx, False):
                 return
 
-            fame_user = FameUser.from_file(user.id)
+            fame_user = self.get_user(user)
 
             embed = self.get_base_embed(ctx.author, title=f'{user.name}\'s Profile')
             embed.add_field(name='Leveling', value=fame_user.leveling_formatted, inline=False)
