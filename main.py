@@ -616,7 +616,6 @@ class FameBot:
         # failsafe to prevent data loss
         bot.save_data()
         for obj in list(self.loaded_users.values()) + list(self.loaded_recaps.values()):
-            print(obj)
             obj.save()
 
 
