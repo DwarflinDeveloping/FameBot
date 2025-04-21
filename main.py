@@ -279,7 +279,7 @@ class FameBot:
                 role = guild.get_role(role_id)
                 if role not in user.roles:
                     await user.add_roles(role)
-                    await channel.send(f'You have been granted the {role.mention} role!')
+                    await channel.send(f'{ctx.user.mention} has reached {fame_user.total_votes} votes! You are now a {role.name}!')
 
         self.users_role_checked.append(user.id)
 
