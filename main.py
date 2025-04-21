@@ -612,7 +612,12 @@ class FameBot:
         self.bot = Bot(intents=Intents.default())
         self.register_cmds()
         self.bot.run(os.getenv('TOKEN'))
-        bot.save_data()  # failsafe to prevent data loss
+
+        # failsafe to prevent data loss
+        bot.save_data()
+        for obj in list(self.loaded_users.values()) + list(self.loaded_recaps.values()):
+            print(obj)
+            obj.save()
 
 
 if __name__ == '__main__':
