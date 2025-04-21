@@ -175,6 +175,8 @@ class FameBot:
                         description=f'Voting is on cooldown for {ceil(rem)} second{"s" if rem > 1 else ""}.',
                         error=True)
                     await interaction.respond(embed=embed, ephemeral=True)
+                    button.disabled = True
+                    await interaction.message.edit(view=view)
                     return
 
                 button.disabled = True

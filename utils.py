@@ -26,8 +26,11 @@ ALTERNATIVE_CNAMES = {
 def alpha2_to_country(alpha2: str) -> str:
     return ALPHA2_TO_COUNTRY[alpha2]
 
-def country_to_alpha2(*country_names: str) -> str:
-    return country_converter.convert(names=country_names, to='ISO2')
+def country_to_alpha2(country_name: str) -> str:
+    alpha2 = country_converter.convert(names=(country_name,), to='ISO2')
+    if alpha2 == 'not found':
+        raise ValueError('Country not found!')
+    return alpha2
 
 CONTINENT_CORRECTIONS = {
     'GE': 'EU',
