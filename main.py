@@ -114,13 +114,12 @@ class FameBot:
 
         self.data['total'][alpha2][VOTES] += votes_count
         user.total_votes += votes_count
-        user.data['country'][alpha2][VOTES] += votes_count
 
-        # points_incr = self.calc_incr(votes_count)
         points_incr = user.points_per_vote * votes_count
         self.data['total'][alpha2][POINTS] += points_incr
         user.total_points += points_incr
-        user.data['country'][alpha2][POINTS] += points_incr
+
+        user.add_country_alltime(alpha2, points=points_incr, votes=votes_count)
         user.save()
 
         new_order = (self.get_order(POINTS), self.get_order(VOTES))

@@ -18,7 +18,8 @@ images_dir = Path('users')
 for path in flags_dir, banners_dir, users_dir, images_dir:
     path.mkdir(exist_ok=True)
 
-COUNTRY_DATA_PRESET = {country.alpha_2: {'votes': 0, 'points': 0} for country in pycountry.countries}
+PV_PRESET = {'votes': 0, 'points': 0}
+COUNTRY_DATA_PRESET = {country.alpha_2: PV_PRESET.copy() for country in pycountry.countries}
 
 DATA_PRESET = {
     'total': COUNTRY_DATA_PRESET,
@@ -30,8 +31,8 @@ DATA_PRESET = {
 }
 
 USER_DATA_PRESET = {
-    'total': {'votes': 0, 'points': 0},
-    'country': {country.alpha_2: {'votes': 0, 'points': 0} for country in pycountry.countries},
+    'total': PV_PRESET.copy(),
+    'alltime_country': {},
     'additional_xp': 0,
     'next_vote': None,
     'daily_claim': None
@@ -91,6 +92,15 @@ class FameUser:
     @total_points.setter
     def total_points(self, value: int) -> None:
         self.data['total']['points'] = value
+
+    def get_country_alltime(self, alpha2: str):
+        return self.data['alltime_country'][alpha2] if alpha2 in self.data['alltime_country'] else PV_PRESET.copy()
+
+    def add_country_alltime(self, alpha2: str, points: int = 0, votes: int = 0):
+        c_alltime = self.get_country_alltime(alpha2)
+        c_alltime['votes'] += votes
+        c_alltime['points'] += points
+        self.data['alltime_country'][alpha2] = c_alltime
 
     @property
     def additional_xp(self) -> int:
