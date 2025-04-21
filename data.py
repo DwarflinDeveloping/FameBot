@@ -3,27 +3,28 @@ import json
 from math import floor
 from pathlib import Path
 import dataclasses
-from time import time, sleep
-from typing import Dict, Self, Iterator, List
-from xml.etree.ElementTree import indent
+from time import time
+from typing import Dict, Self, Iterator
 
 import discord
 import pycountry
 
 data_path = Path('data.json')
+
 flags_dir = Path('flags')
 banners_dir = Path('banners')
 users_dir = Path('users')
-images_dir = Path('users')
-for path in flags_dir, banners_dir, users_dir, images_dir:
+images_dir = Path('images')
+recaps_dir = Path('recaps')
+for path in flags_dir, banners_dir, users_dir, images_dir, recaps_dir:
     path.mkdir(exist_ok=True)
 
 PV_PRESET = {'votes': 0, 'points': 0}
+DPV_PRESET = PV_PRESET | {'dpos_votes': 0, 'dpos_points': 0}
 COUNTRY_DATA_PRESET = {country.alpha_2: PV_PRESET.copy() for country in pycountry.countries}
 
 DATA_PRESET = {
     'total': COUNTRY_DATA_PRESET,
-    'recap': {scope: {country.alpha_2: {'votes': 0, 'points': 0, 'dpos_votes': 0, 'dpos_points': 0} for country in pycountry.countries} for scope in ['daily', 'weekly', 'seasonal']},
     'daily_claims': {},
     'users': {},
     'maintenance': False,
@@ -36,6 +37,11 @@ USER_DATA_PRESET = {
     'additional_xp': 0,
     'next_vote': None,
     'daily_claim': None
+}
+
+RECAP_DATA_PRESET = {
+    'start_timestamp': None,
+    'country': {}
 }
 
 PROGRESSION_ROLES = {
@@ -57,6 +63,57 @@ PROGRESSION_ROLES = {
 }
 
 @dataclasses.dataclass
+class FameRecap:
+    data: dict
+    scope: str
+
+    @classmethod
+    def from_file(cls, scope: str) -> Self:
+        file_path = Path(recaps_dir, f'{scope}.json')
+        if file_path.is_file():
+            recap_data = json.loads(file_path.read_text())
+        else:
+            recap_data = RECAP_DATA_PRESET.copy()
+            if scope == 'alltime':
+                recap_data['country'] = COUNTRY_DATA_PRESET
+            recap_data['start_timestamp'] = time()
+        return cls(recap_data, scope)
+
+    @property
+    def file_path(self) -> Path:
+        return Path(recaps_dir, f'{self.scope}.json')
+
+    def save(self):
+        self.file_path.write_text(json.dumps(self.data, indent=2))
+
+    @property
+    def start_timestamp(self) -> float:
+        return self.data['start_timestamp']
+
+    @start_timestamp.setter
+    def start_timestamp(self, value: float) -> None:
+        self.data['start_timestamp'] = value
+
+    def get(self, alpha2: str):
+        return self.data['country'][alpha2] if alpha2 in self.data['country'] else DPV_PRESET.copy()
+
+    def add(self, alpha2: str, points: int = 0, votes: int = 0, **kwargs):
+        c_data = self.get(alpha2)
+        c_data['votes'] += votes
+        c_data['points'] += points
+        for a, b in kwargs.items():
+            c_data[a] += b
+        self.data['country'][alpha2] = c_data
+
+    def set(self, alpha2: str, points: int = 0, votes: int = 0, **kwargs):
+        c_data = self.get(alpha2)
+        c_data['votes'] = votes
+        c_data['points'] = points
+        for a, b in kwargs.items():
+            c_data[a] = b
+        self.data['country'][alpha2] = c_data
+
+@dataclasses.dataclass
 class FameUser:
     data: dict
     user_id: int
@@ -67,7 +124,7 @@ class FameUser:
         if file_path.is_file():
             user_data = json.loads(file_path.read_text())
         else:
-            user_data = USER_DATA_PRESET
+            user_data = USER_DATA_PRESET.copy()
         return cls(user_data, user_id)
 
     @property

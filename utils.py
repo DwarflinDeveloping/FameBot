@@ -13,8 +13,8 @@ CTYPES = Literal[POINTS, VOTES]
 def sort_dict(inp_dict: dict) -> dict:
     return dict(sorted(inp_dict.items(), key=lambda item: item[1], reverse=True))
 
-COUNTRIES_NAME_LIST = [country.name.lower() for country in pycountry.countries]
 ALPHA2_TO_COUNTRY = {country.alpha_2: country.name for country in pycountry.countries}
+ALPHA2_COUNTRIES, CNAMES = ALPHA2_TO_COUNTRY.keys(), ALPHA2_TO_COUNTRY.values()
 
 ALTERNATIVE_CNAMES = {
     'Turkey': 'TR',

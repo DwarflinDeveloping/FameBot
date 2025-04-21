@@ -2,10 +2,10 @@ import asyncio
 from math import ceil
 
 from data import FameUser, load_data, save_data, flags_dir, DATA_PRESET, get_flag, get_banner, get_flag_path, \
-    get_banner_path
+    get_banner_path, FameRecap
 from utils import sort_dict, alpha2_to_country, country_to_alpha2, ALTERNATIVE_CNAMES, incr_symbol, \
     millify, get_rank_symbol, CONTINENT_CODE_TO_NAME, points_per_capita, country_to_continent, format_country_ranking, \
-    format_cname, POINTS, VOTES, CTYPES
+    format_cname, POINTS, VOTES, CTYPES, ALPHA2_COUNTRIES
 
 import datetime
 import os
@@ -21,7 +21,8 @@ from typing import Tuple, List, Iterator, Dict
 class FameBot:
     def __init__(self, cooldown: float = 5, daily_votes: int = 30, recap_scopes=None, upload_images: bool = False):
         if recap_scopes is None:
-            self.recap_scopes = ['daily', 'weekly', 'seasonal']
+            self.visible_recap_scopes = ['daily', 'weekly', 'seasonal']
+            self.recap_scopes = self.visible_recap_scopes + ['alltime']
         else:
             self.recap_scopes = recap_scopes
         self.cooldown = cooldown
@@ -32,29 +33,43 @@ class FameBot:
         self.data = load_data()
         self.users_role_checked = []
         self.loaded_users: Dict[int, FameUser] = {}
+        self.loaded_recaps: Dict[str, FameRecap] = {}
 
     def save_data(self) -> None:
         save_data(self.data)
 
     @property
     def total_votes(self) -> int:
-        return sum(self.data['total'][country][VOTES] for country in self.data['total'])
+        recap = self.get_recap('alltime')
+        return sum(recap.get(alpha2)[VOTES] for alpha2 in ALPHA2_COUNTRIES)
 
     @property
-    def users(self) -> Iterator[FameUser]:
-        for user_id in self.data['users']:
-            yield FameUser(self.data['users'][user_id], user_id)
+    def total_points(self) -> int:
+        recap = self.get_recap('alltime')
+        return sum(recap.get(alpha2)[POINTS] for alpha2 in ALPHA2_COUNTRIES)
 
-    def get_order(self, ctype: CTYPES, recap_scope: str | None = None) -> List[str]:
-        data = self.data['total'] if recap_scope is None else self.data['recap'][recap_scope]
-        return list(sort_dict({c: data[c][ctype] for c in data}).keys())
+    @property
+    def on_maintenance(self) -> bool:
+        return self.data['maintenance']
 
-    def get_rank(self, alpha2: str, ctype: CTYPES, recap_scope: str | None = None) -> int:
+    @on_maintenance.setter
+    def on_maintenance(self, value: bool) -> None:
+        self.data['maintenance'] = value
+
+    @property
+    def admin_ids(self) -> List[int]:
+        return self.data['admins']
+
+    def get_order(self, ctype: CTYPES, recap_scope: str = 'alltime') -> List[str]:
+        recap = self.get_recap(recap_scope)
+        return list(sort_dict({alpha2: recap.get(alpha2)[ctype] for alpha2 in ALPHA2_COUNTRIES}).keys())
+
+    def get_rank(self, alpha2: str, ctype: CTYPES, recap_scope: str = 'alltime') -> int:
         return self.get_order(ctype, recap_scope).index(alpha2) + 1
 
     async def eval_country(self, ctx: ApplicationContext, inp: str) -> Tuple[str, str] | None:
         c_inp = inp.upper()
-        if c_inp in self.data['total']:  # valid alpha2 code
+        if c_inp in ALPHA2_COUNTRIES:  # valid alpha2 code
             return c_inp, alpha2_to_country(c_inp)
 
         c_inp = c_inp.lower().capitalize()
@@ -83,6 +98,25 @@ class FameBot:
         self.loaded_users[user.id] = fame_user
         return fame_user
 
+    def get_recap(self, scope: str) -> FameRecap:
+        if scope in self.loaded_recaps:
+            return self.loaded_recaps[scope]
+
+        recap = FameRecap.from_file(scope)
+        self.loaded_recaps[scope] = recap
+        return recap
+
+    def get_top_countries(self, scope: str):
+        recap = self.get_recap(scope)
+
+        point_values, vote_values = dict(), dict()
+        for alpha2 in ALPHA2_COUNTRIES:
+            c_data = recap.get(alpha2)
+            point_values[alpha2] = c_data[POINTS]
+            vote_values[alpha2] = c_data[VOTES]
+
+        return sort_dict(point_values), sort_dict(vote_values)
+
     @staticmethod
     def get_base_embed(user: User, title: str, error: bool = False, **kwargs) -> Embed:
         embed = Embed(
@@ -102,21 +136,29 @@ class FameBot:
         return sum([self.total_votes+i-1 for i in range(votes_count)])
 
     def update_recap_ranks(self, prev_order: Tuple[List[str], List[str]], new_order: Tuple[List[str], List[str]]) -> None:
-        for scope in self.recap_scopes:
-            for alpha2 in self.data['recap'][scope]:
+        for scope in self.visible_recap_scopes:
+            recap = self.get_recap(scope)
+            changes = False
+
+            for alpha2 in ALPHA2_COUNTRIES:
                 p_prev, v_prev = prev_order[0].index(alpha2), prev_order[1].index(alpha2)
                 p_new, v_new = new_order[0].index(alpha2), new_order[1].index(alpha2)
-                self.data['recap'][scope][alpha2]['dpos_points'] += p_prev - p_new
-                self.data['recap'][scope][alpha2]['dpos_votes'] += v_prev - v_new
+                dp, dv = p_prev - p_new, v_prev - v_new
+                if dp != 0:
+                    recap.add(alpha2, dpos_points=dp)
+                    changes = True
+                if dv != 0:
+                    recap.add(alpha2, dpos_votes=dv)
+                    changes = True
+
+            if changes:
+                recap.save()
 
     def do_vote(self, user: FameUser, alpha2: str, votes_count: int) -> int:
         prev_order = (self.get_order(POINTS), self.get_order(VOTES))
 
-        self.data['total'][alpha2][VOTES] += votes_count
-        user.total_votes += votes_count
-
         points_incr = user.points_per_vote * votes_count
-        self.data['total'][alpha2][POINTS] += points_incr
+        user.total_votes += votes_count
         user.total_points += points_incr
 
         user.add_country_alltime(alpha2, points=points_incr, votes=votes_count)
@@ -126,15 +168,16 @@ class FameBot:
         self.update_recap_ranks(prev_order, new_order)
 
         for scope in self.recap_scopes:
-            self.data['recap'][scope][alpha2][VOTES] += votes_count
-            self.data['recap'][scope][alpha2][POINTS] += points_incr
+            recap = self.get_recap(scope)
+            recap.add(alpha2, points=points_incr, votes=votes_count)
+            recap.save()
 
         self.save_data()
         return points_incr
 
-    def get_country_stats(self, alpha2: str) -> Tuple[int, int, int, int]:
-        return self.data['total'][alpha2][VOTES], self.data['total'][alpha2][POINTS], \
-               self.get_rank(alpha2, VOTES), self.get_rank(alpha2, POINTS)
+    def get_country_stats(self, alpha2: str, scope: str = 'alltime') -> Tuple[int, int, int, int]:
+        c_data = self.get_recap(scope).get(alpha2)
+        return c_data[VOTES], c_data[POINTS], self.get_rank(alpha2, VOTES, scope), self.get_rank(alpha2, POINTS, scope)
 
     def vote_args(self, alpha2, c_name: str, fame_user: FameUser, user: User):
         fame_user.update_next_vote(self.cooldown)
@@ -215,9 +258,9 @@ class FameBot:
         return vote_args
 
     async def check_permissions(self, ctx: ApplicationContext, admin_only: bool) -> bool:
-        if admin_only and ctx.user.id not in self.data['admins']:
+        if admin_only and ctx.user.id not in self.admin_ids:
             description = ':no_entry_sign: You need to be Admin to use this command!'
-        elif self.data['maintenance'] and ctx.user.id not in self.data['admins']:
+        elif self.on_maintenance and ctx.user.id not in self.admin_ids:
             description = ':tools: The bot is currently under maintenance.'
         else:
             return True
@@ -314,8 +357,9 @@ class FameBot:
                 await ctx.respond(embed=self.get_base_embed(ctx.author, 'Unknown ctype!', desccription='Use "votes" or "points".'), ephemeral=True)
                 return
 
-            self.data['total'][alpha2][ctype] = amount
-            self.save_data()
+            recap = self.get_recap('alltime')
+            recap.set(alpha2, **{ctype: amount})
+            recap.save()
             await ctx.respond(embed=self.get_base_embed(ctx.author, 'Data changed', description=f'{ctype.capitalize()} for {alpha2_to_country(alpha2)} ({alpha2}) set to {amount}!'), ephemeral=True)
 
         @country_cmds.command(
@@ -341,7 +385,8 @@ class FameBot:
             except TypeError:
                 return
 
-            vote_count, point_count = self.data['total'][alpha2][VOTES], self.data['total'][alpha2][POINTS]
+            c_data = self.get_recap('alltime').get(alpha2)
+            vote_count, point_count = c_data[VOTES], c_data[POINTS]
             vote_rank, points_rank = self.get_rank(alpha2, VOTES), self.get_rank(alpha2, POINTS)
 
             embed = self.get_base_embed(ctx.author, title=format_cname(alpha2, c_name))
@@ -369,27 +414,24 @@ class FameBot:
             if not await self.check_permissions(ctx, False):
                 return
 
-            point_values = {c: self.data['total'][c][POINTS] for c in self.data['total']}
-            point_values = sort_dict(point_values)
-            vote_values = {c: self.data['total'][c][VOTES] for c in self.data['total']}
-            vote_values = sort_dict(vote_values)
-
+            recap = self.get_recap('alltime')
+            point_values, vote_values = self.get_top_countries('alltime')
             point_str, vote_str = str(), str()
             for i, alpha2 in enumerate(point_values, start=1):
                 if i > 20:
                     break
+                c_data = recap.get(alpha2)
                 c_name = alpha2_to_country(alpha2)
-                point_count = self.data['total'][alpha2][POINTS]
-                point_rank = self.get_rank(alpha2, POINTS)
+                point_count, point_rank = c_data[POINTS], self.get_rank(alpha2, POINTS)
                 if point_count == 0: continue
                 point_str += format_country_ranking(format_cname(alpha2, c_name), point_rank, point_count, POINTS) + '\n'
 
             for i, alpha2 in enumerate(vote_values, start=1):
                 if i > 20:
                     break
+                c_data = recap.get(alpha2)
                 c_name = alpha2_to_country(alpha2)
-                vote_count = self.data['total'][alpha2][VOTES]
-                vote_rank = self.get_rank(alpha2, VOTES)
+                vote_count, vote_rank = c_data[VOTES], self.get_rank(alpha2, VOTES)
                 if vote_count == 0: continue
                 vote_str += format_country_ranking(format_cname(alpha2, c_name), vote_rank, vote_count, VOTES) + '\n'
 
@@ -405,18 +447,21 @@ class FameBot:
         async def contop_cmd(ctx: ApplicationContext):
             if not await self.check_permissions(ctx, False):
                 return
+
+            recap = self.get_recap('alltime')
             point_values = {}
             vote_values = {}
 
-            for alpha2 in self.data['total']:
+            for alpha2 in ALPHA2_COUNTRIES:
                 continent = country_to_continent(alpha2)
                 if continent not in point_values:
                     point_values[continent] = 0
                 if continent not in vote_values:
                     vote_values[continent] = 0
 
-                point_values[continent] += self.data['total'][alpha2][POINTS]
-                vote_values[continent] += self.data['total'][alpha2][VOTES]
+                c_data = recap.get(alpha2)
+                point_values[continent] += c_data[POINTS]
+                vote_values[continent] += c_data[VOTES]
 
             point_values, vote_values = sort_dict(point_values), sort_dict(vote_values)
             point_str = '\n'.join([format_country_ranking(CONTINENT_CODE_TO_NAME[con], n, point_values[con], POINTS) \
@@ -480,34 +525,31 @@ class FameBot:
         async def daily_cmd(ctx: ApplicationContext, value: Option(bool)):
             if not await self.check_permissions(ctx, True):
                 return
-            self.data['maintenance'] = value
+            self.on_maintenance = value
 
         @self.bot.slash_command(
             name='recap',
             description='Generates a recap for a given time frame!'
         )
-        async def recap_cmd(ctx: ApplicationContext, scope: Option(str, choices=self.recap_scopes)):
+        async def recap_cmd(ctx: ApplicationContext, scope: Option(str, choices=self.visible_recap_scopes)):
             if not await self.check_permissions(ctx, False):
                 return
 
-            point_values = {c: self.data['recap'][scope][c][POINTS] for c in self.data['recap'][scope]}
-            point_values = sort_dict(point_values)
-            vote_values = {c: self.data['recap'][scope][c][VOTES] for c in self.data['recap'][scope]}
-            vote_values = sort_dict(vote_values)
-
+            recap = self.get_recap(scope)
+            point_values, vote_values = self.get_top_countries(scope)
             point_str, vote_str = str(), str()
             for alpha2 in point_values:
+                c_data = recap.get(alpha2)
                 c_name = alpha2_to_country(alpha2)
-                c_data = self.data['recap'][scope][alpha2]
-                point_count, point_dpos = c_data[POINTS], c_data['dpos_points']
+                point_count, point_dpos = c_data[POINTS], self.get_rank(alpha2, POINTS, c_data['dpos_points'])
                 point_rank = self.get_rank(alpha2, POINTS, scope)
                 if point_count == 0: continue
                 point_str += format_country_ranking(c_name, point_rank, point_count, POINTS, point_dpos, True) + '\n'
 
             for alpha2 in vote_values:
+                c_data = recap.get(alpha2)
                 c_name = alpha2_to_country(alpha2)
-                c_data = self.data['recap'][scope][alpha2]
-                vote_count, vote_dpos = c_data[VOTES], c_data['dpos_votes']
+                vote_count, vote_dpos = c_data[VOTES], self.get_rank(alpha2, VOTES, c_data['dpos_votes'])
                 vote_rank = self.get_rank(alpha2, VOTES, scope)
                 if vote_count == 0: continue
                 vote_str += format_country_ranking(c_name, vote_rank, vote_count, VOTES, vote_dpos, True) + '\n'
