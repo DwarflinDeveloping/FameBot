@@ -1,8 +1,9 @@
 import asyncio
+import shutil
 from math import ceil
 
 from data import FameUser, load_data, save_data, flags_dir, DATA_PRESET, get_flag, get_banner, get_flag_path, \
-    get_banner_path, FameRecap
+    get_banner_path, FameRecap, recaps_dir, users_dir
 from utils import sort_dict, alpha2_to_country, country_to_alpha2, ALTERNATIVE_CNAMES, incr_symbol, \
     millify, get_rank_symbol, CONTINENT_CODE_TO_NAME, points_per_capita, country_to_continent, format_country_ranking, \
     format_cname, POINTS, VOTES, CTYPES, ALPHA2_COUNTRIES
@@ -235,8 +236,8 @@ class FameBot:
                 await interaction.edit(view=view)
 
                 _vote_args = self.vote_args(alpha2, c_name, _fame_user, user)
-                if interaction.user.id not in self.users_role_checked:
-                    await self.check_roles(interaction, fame_user)
+                # if interaction.user.id not in self.users_role_checked:
+                await self.check_roles(interaction, fame_user)
                 new_resp = await interaction.respond(**_vote_args)
                 await _fame_user.wait_cooldown()
 
@@ -303,7 +304,7 @@ class FameBot:
                 rem = user.remaining_cooldown
                 embed = self.get_base_embed(
                         ctx.author, 'Slow down!',
-                        description=f'Voting is on cooldown for {ceil(rem)} second{'s' if rem>1 else ''}.',
+                        description=f'Voting is on cooldown for {ceil(rem)} second{"s" if rem>1 else ""}.',
                         error=True)
                 await ctx.respond(embed=embed, ephemeral=True)
                 return
@@ -314,7 +315,8 @@ class FameBot:
                 return
 
             vote_args = self.vote_args(alpha2, c_name, user, ctx.author)
-            if ctx.author.id not in self.users_role_checked: await self.check_roles(ctx, user)
+            # if ctx.author.id not in self.users_role_checked:
+            await self.check_roles(ctx, user)
             await ctx.respond(**vote_args)
 
             await user.wait_cooldown()
@@ -334,7 +336,13 @@ class FameBot:
         async def dbclear_cmd(ctx: ApplicationContext):
             if not await self.check_permissions(ctx, True):
                 return
+
             self.data = DATA_PRESET.copy()
+            for dir_path in recaps_dir, users_dir:
+                for file in os.listdir(dir_path):
+                    os.remove(Path(dir_path, file))
+            self.loaded_recaps, self.loaded_users = {}, {}
+
             await ctx.respond(embed=self.get_base_embed(ctx.author, 'Database cleared', description='Hope you know what you are doing!'), ephemeral=True)
 
         @country_cmds.command(
@@ -499,7 +507,8 @@ class FameBot:
 
             fame_user = self.get_user(ctx.author)
             points_incr = self.do_vote(fame_user, alpha2, self.daily_votes)
-            if ctx.author.id not in self.users_role_checked: await self.check_roles(ctx, fame_user)
+            # if ctx.author.id not in self.users_role_checked:
+            await self.check_roles(ctx, fame_user)
             self.save_data()
 
             vote_count, point_count, vote_rank, points_rank = self.get_country_stats(alpha2)
