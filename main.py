@@ -172,7 +172,7 @@ class FameBot:
                     rem = _fame_user.remaining_cooldown
                     embed = self.get_base_embed(
                         interaction.user, 'Slow down!',
-                        description=f'Voting is on cooldown for {ceil(rem)} second{'s' if rem > 1 else ''}.',
+                        description=f'Voting is on cooldown for {ceil(rem)} second{"s" if rem > 1 else ""}.',
                         error=True)
                     await interaction.respond(embed=embed, ephemeral=True)
                     return

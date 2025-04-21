@@ -22,7 +22,7 @@ COUNTRY_DATA_PRESET = {country.alpha_2: {'votes': 0, 'points': 0} for country in
 
 DATA_PRESET = {
     'total': COUNTRY_DATA_PRESET,
-    'recap': {scope: {country.alpha_2: {'votes': 0, 'points': 0, 'dpos_votes': 0, 'dpos_points': 0} for country in pycountry.countries} for scope in ['daily', 'weekly', 'monthly']},
+    'recap': {scope: {country.alpha_2: {'votes': 0, 'points': 0, 'dpos_votes': 0, 'dpos_points': 0} for country in pycountry.countries} for scope in ['daily', 'weekly', 'seasonal']},
     'daily_claims': {},
     'users': {},
     'maintenance': False,
