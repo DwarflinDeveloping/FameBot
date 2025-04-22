@@ -1,4 +1,3 @@
-import enum
 from typing import Literal
 import pycountry
 import country_converter
@@ -59,6 +58,7 @@ CONTINENT_CODE_TO_NAME = {
     'AF': 'Africa',
     'AN': 'Antarctic Territories'
 }
+ALPHA2_CONTINENTS = CONTINENT_CODE_TO_NAME.keys()
 
 def points_per_capita(alpha2: str, point_count: int) -> float:
     pop = pypopulation.get_population_a2(alpha2)

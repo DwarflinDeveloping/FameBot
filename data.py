@@ -2,10 +2,11 @@ import asyncio
 import json
 import os
 from math import floor
+from os import PathLike
 from pathlib import Path
 import dataclasses
 from time import time
-from typing import Dict, Self, Iterator
+from typing import Dict, Self, Iterator, List
 
 import discord
 import pycountry
@@ -14,9 +15,11 @@ data_path = Path('data.json')
 
 flags_dir = Path('flags')
 banners_dir = Path('banners')
-users_dir = Path('users')
 images_dir = Path('images')
+
+users_dir = Path('users')
 recaps_dir = Path('recaps')
+
 for path in flags_dir, banners_dir, users_dir, images_dir, recaps_dir:
     path.mkdir(exist_ok=True)
 
@@ -125,6 +128,7 @@ class FameRecap:
 class FameUser:
     data: dict
     user_id: int
+    start_xp: int = 100
 
     @classmethod
     def from_file(cls, user_id: int) -> Self:
@@ -211,7 +215,7 @@ class FameUser:
 
     @property
     def leveling(self) -> float:
-        return 1 + (self.total_votes * 10 + self.additional_xp) / 100
+        return (self.start_xp + self.total_votes * 10 + self.additional_xp) / 100
 
     @property
     def points_per_vote(self) -> int:
@@ -229,7 +233,7 @@ class FameUser:
 
     @property
     def leveling_formatted(self) -> str:
-        return f'**Lvl. {floor(self.leveling)}** ({floor((self.leveling%1)*100)}% progress)'
+        return f'**Lvl. {floor(self.leveling)}** ({floor((self.leveling % 1 + 1e-5)*100)}% progress)'
 
 def load_data() -> dict:
     if data_path.exists():
@@ -239,6 +243,19 @@ def load_data() -> dict:
 
 def save_data(value: dict) -> None:
     data_path.write_text(json.dumps(value, indent=2))
+
+def clear_folder(dir_path: PathLike):
+    for file in os.listdir(dir_path):
+        os.remove(Path(dir_path, file))
+
+def clear_database(users: bool = False, recaps: List[str] | bool = False):
+    if users is True:
+        clear_folder(users_dir)
+    if type(recaps) == bool and recaps is True:
+        clear_folder(recaps_dir)
+    elif type(recaps) == list:
+        for scope in recaps:
+            os.remove(Path(recaps_dir, f'{scope}.json'))
 
 def get_flag_path(alpha2: str):
     return Path(flags_dir, alpha2 + '.png')

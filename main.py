@@ -3,10 +3,10 @@ import shutil
 from math import ceil
 
 from data import FameUser, load_data, save_data, flags_dir, DATA_PRESET, get_flag, get_banner, get_flag_path, \
-    get_banner_path, FameRecap, recaps_dir, users_dir
+    get_banner_path, FameRecap, recaps_dir, users_dir, clear_database
 from utils import sort_dict, alpha2_to_country, country_to_alpha2, ALTERNATIVE_CNAMES, incr_symbol, \
     millify, get_rank_symbol, CONTINENT_CODE_TO_NAME, points_per_capita, country_to_continent, format_country_ranking, \
-    format_cname, POINTS, VOTES, CTYPES, ALPHA2_COUNTRIES
+    format_cname, POINTS, VOTES, CTYPES, ALPHA2_COUNTRIES, ALPHA2_CONTINENTS
 
 import datetime
 import os
@@ -16,7 +16,7 @@ from pathlib import Path
 from discord import default_permissions, ApplicationContext, Interaction, Button, User, Guild, Member, Option, File, \
     Embed, Colour, ButtonStyle, ui, Bot, Intents, SlashCommandGroup
 
-from typing import Tuple, List, Iterator, Dict
+from typing import Tuple, List, Iterator, Dict, Any
 
 
 class FameBot:
@@ -107,7 +107,7 @@ class FameBot:
         self.loaded_recaps[scope] = recap
         return recap
 
-    def get_top_countries(self, scope: str):
+    def get_top_countries(self, scope: str) -> Tuple[Dict[str, int], Dict[str, int]]:
         recap = self.get_recap(scope)
 
         point_values, vote_values = dict(), dict()
@@ -115,6 +115,23 @@ class FameBot:
             c_data = recap.get(alpha2)
             point_values[alpha2] = c_data[POINTS]
             vote_values[alpha2] = c_data[VOTES]
+
+        return sort_dict(point_values), sort_dict(vote_values)
+
+    def get_top_continents(self, scope: str) -> Tuple[Dict[str, int], Dict[str, int]]:
+        recap = self.get_recap(scope)
+
+        point_values, vote_values = dict(), dict()
+        for alpha2 in ALPHA2_COUNTRIES:
+            continent = country_to_continent(alpha2)
+            if continent not in point_values:
+                point_values[continent] = 0
+            if continent not in vote_values:
+                vote_values[continent] = 0
+
+            c_data = recap.get(alpha2)
+            point_values[continent] += c_data[POINTS]
+            vote_values[continent] += c_data[VOTES]
 
         return sort_dict(point_values), sort_dict(vote_values)
 
@@ -127,8 +144,8 @@ class FameBot:
             **kwargs
         )
         embed.set_footer(
-            text=f'{user.name}',
-            icon_url=user.avatar.url
+            text=user.name,
+            icon_url=user.avatar.url if user.avatar else user.default_avatar.url
         )
         return embed
 
@@ -165,13 +182,13 @@ class FameBot:
         user.add_country_alltime(alpha2, points=points_incr, votes=votes_count)
         user.save()
 
-        new_order = (self.get_order(POINTS), self.get_order(VOTES))
-        self.update_recap_ranks(prev_order, new_order)
-
         for scope in self.recap_scopes:
             recap = self.get_recap(scope)
             recap.add(alpha2, points=points_incr, votes=votes_count)
             recap.save()
+
+        new_order = (self.get_order(POINTS), self.get_order(VOTES))
+        self.update_recap_ranks(prev_order, new_order)
 
         self.save_data()
         return points_incr
@@ -220,6 +237,9 @@ class FameBot:
                     await interaction.respond(embed=self.get_base_embed(user, f'This is {user.name}\'s voting window! Make your own one using /cvote', error=True), ephemeral=True)
                     return
 
+                if not await self.check_permissions(interaction, False):
+                    return
+
                 _fame_user = self.get_user(interaction.user)
                 if _fame_user.next_vote and not _fame_user.vote_ready:
                     rem = _fame_user.remaining_cooldown
@@ -258,7 +278,7 @@ class FameBot:
 
         return vote_args
 
-    async def check_permissions(self, ctx: ApplicationContext, admin_only: bool) -> bool:
+    async def check_permissions(self, ctx: ApplicationContext | Interaction, admin_only: bool) -> bool:
         if admin_only and ctx.user.id not in self.admin_ids:
             description = ':no_entry_sign: You need to be Admin to use this command!'
         elif self.on_maintenance and ctx.user.id not in self.admin_ids:
@@ -274,7 +294,7 @@ class FameBot:
             user, guild, channel = ctx.author, ctx.guild, ctx.channel
         else:
             user, guild, channel = ctx.user, ctx.guild, ctx.channel
-        if type(user) == Member:  # only role checking on servers
+        if type(user) == Member and guild.id == 378587218849300481:  # only role checking on the FAME server
             for role_id in fame_user.roles:
                 role = guild.get_role(role_id)
                 if role not in user.roles:
@@ -282,6 +302,60 @@ class FameBot:
                     await channel.send(f'{ctx.user.mention} has reached {fame_user.total_votes} votes! You are now a {role.name}!')
 
         self.users_role_checked.append(user.id)
+
+    def do_recap(self, ctx: ApplicationContext, scope: str, continents: bool = False) -> Dict[str, Any]:
+        recap = self.get_recap(scope)
+        is_recap = scope != 'alltime' and not continents
+        point_values, vote_values = None, None
+        if continents:
+            point_values, vote_values = self.get_top_continents(scope)
+        point_strs, vote_strs = dict(), dict()
+
+        for alpha2 in ALPHA2_CONTINENTS if continents else ALPHA2_COUNTRIES:
+            vote_dpos, point_dpos = None, None
+
+            if continents:
+                c_name = CONTINENT_CODE_TO_NAME[alpha2]
+                point_count, vote_count = point_values[alpha2], vote_values[alpha2]
+                point_rank, vote_rank = list(point_values.keys()).index(alpha2) + 1, list(vote_values.keys()).index(alpha2) + 1
+
+            else:
+                c_data = recap.get(alpha2)
+                c_name = format_cname(alpha2, alpha2_to_country(alpha2))
+                point_count, vote_count = c_data[POINTS], c_data[VOTES]
+                point_rank, vote_rank = self.get_rank(alpha2, POINTS, scope), self.get_rank(alpha2, VOTES, scope)
+                if is_recap:
+                    vote_dpos, point_dpos = c_data['dpos_votes'], c_data['dpos_points']
+
+            if point_count != 0 or continents:
+                point_strs[format_country_ranking(c_name, point_rank, point_count, POINTS, point_dpos, is_recap)] = point_count
+            if vote_count != 0 or continents:
+                vote_strs[format_country_ranking(c_name, vote_rank, vote_count, VOTES, vote_dpos, is_recap)] = vote_count
+
+        """for alpha2 in point_values:
+            c_data = recap.get(alpha2)
+            c_name = alpha2_to_country(alpha2)
+            point_count, point_dpos = c_data[POINTS], self.get_rank(alpha2, POINTS, c_data['dpos_points'])
+            point_rank = self.get_rank(alpha2, POINTS, scope)
+            if point_count == 0: continue
+            point_strs.append(format_country_ranking(format_cname(alpha2, c_name), point_rank, point_count, POINTS, point_dpos if recap else None, is_recap))
+
+        for alpha2 in vote_values:
+            c_data = recap.get(alpha2)
+            c_name = alpha2_to_country(alpha2)
+            vote_count, vote_dpos = c_data[VOTES], self.get_rank(alpha2, VOTES, c_data['dpos_votes'])
+            vote_rank = self.get_rank(alpha2, VOTES, scope)
+            if vote_count == 0: continue
+            vote_strs.append(format_country_ranking(format_cname(alpha2, c_name), vote_rank, vote_count, POINTS, vote_dpos if recap else None, is_recap))"""
+
+        point_strs, vote_strs = sort_dict(point_strs), sort_dict(vote_strs)
+        point_str, vote_str = '\n'.join(list(point_strs.keys())[:20]), '\n'.join(list(vote_strs.keys())[:20])
+
+        embed = self.get_base_embed(ctx.author, title=f'Top {scope.lower()} countries')
+        embed.add_field(name='Points', value=point_str, inline=True)
+        embed.add_field(name='Votes', value=vote_str, inline=True)
+
+        return {'embed': embed}
 
     def register_cmds(self):
         country_cmds = SlashCommandGroup('country', 'country-related commands')
@@ -329,21 +403,27 @@ class FameBot:
             await ctx.edit(view=vote_args['view'])
 
         @self.bot.slash_command(
-            name='dbclear',
-            description='Clears the entire database'
+            name='reset',
+            description='Resting data manually'
         )
         @default_permissions(administrator=True)
-        async def dbclear_cmd(ctx: ApplicationContext):
+        async def reset_cmd(ctx: ApplicationContext, scope: Option(str, choices=['everything', 'users'] + self.recap_scopes)):
             if not await self.check_permissions(ctx, True):
                 return
 
-            self.data = DATA_PRESET.copy()
-            for dir_path in recaps_dir, users_dir:
-                for file in os.listdir(dir_path):
-                    os.remove(Path(dir_path, file))
+            # self.data = DATA_PRESET.copy()
             self.loaded_recaps, self.loaded_users = {}, {}
 
-            await ctx.respond(embed=self.get_base_embed(ctx.author, 'Database cleared', description='Hope you know what you are doing!'), ephemeral=True)
+            kwargs = {}
+            if scope == 'everything':
+                kwargs['users'], kwargs['recaps'] = True, True
+            elif scope == 'users':
+                kwargs['users'] = True
+            else:
+                kwargs['recaps'] = [scope]
+            clear_database(**kwargs)
+
+            await ctx.respond(embed=self.get_base_embed(ctx.author, f'{scope.capitalize()} cleared', description='Hope you know what you are doing!'), ephemeral=True)
 
         @country_cmds.command(
             name='set',
@@ -422,31 +502,7 @@ class FameBot:
             if not await self.check_permissions(ctx, False):
                 return
 
-            recap = self.get_recap('alltime')
-            point_values, vote_values = self.get_top_countries('alltime')
-            point_str, vote_str = str(), str()
-            for i, alpha2 in enumerate(point_values, start=1):
-                if i > 20:
-                    break
-                c_data = recap.get(alpha2)
-                c_name = alpha2_to_country(alpha2)
-                point_count, point_rank = c_data[POINTS], self.get_rank(alpha2, POINTS)
-                if point_count == 0: continue
-                point_str += format_country_ranking(format_cname(alpha2, c_name), point_rank, point_count, POINTS) + '\n'
-
-            for i, alpha2 in enumerate(vote_values, start=1):
-                if i > 20:
-                    break
-                c_data = recap.get(alpha2)
-                c_name = alpha2_to_country(alpha2)
-                vote_count, vote_rank = c_data[VOTES], self.get_rank(alpha2, VOTES)
-                if vote_count == 0: continue
-                vote_str += format_country_ranking(format_cname(alpha2, c_name), vote_rank, vote_count, VOTES) + '\n'
-
-            embed = self.get_base_embed(ctx.author, title='Top countries')
-            embed.add_field(name='Points', value=point_str, inline=True)
-            embed.add_field(name='Votes', value=vote_str, inline=True)
-            await ctx.respond(embed=embed)
+            await ctx.respond(**self.do_recap(ctx, 'alltime'))
 
         @top_cmds.command(
             name='continent',
@@ -456,31 +512,7 @@ class FameBot:
             if not await self.check_permissions(ctx, False):
                 return
 
-            recap = self.get_recap('alltime')
-            point_values = {}
-            vote_values = {}
-
-            for alpha2 in ALPHA2_COUNTRIES:
-                continent = country_to_continent(alpha2)
-                if continent not in point_values:
-                    point_values[continent] = 0
-                if continent not in vote_values:
-                    vote_values[continent] = 0
-
-                c_data = recap.get(alpha2)
-                point_values[continent] += c_data[POINTS]
-                vote_values[continent] += c_data[VOTES]
-
-            point_values, vote_values = sort_dict(point_values), sort_dict(vote_values)
-            point_str = '\n'.join([format_country_ranking(CONTINENT_CODE_TO_NAME[con], n, point_values[con], POINTS) \
-                                   for n, con in enumerate(point_values, 1)])
-            vote_str = '\n'.join([format_country_ranking(CONTINENT_CODE_TO_NAME[con], n, vote_values[con], VOTES) \
-                                  for n, con in enumerate(vote_values, 1)])
-
-            embed = self.get_base_embed(ctx.author, title='Top continents')
-            embed.add_field(name='Points', value=point_str, inline=True)
-            embed.add_field(name='Votes', value=vote_str, inline=True)
-            await ctx.respond(embed=embed)
+            await ctx.respond(**self.do_recap(ctx, 'alltime', continents=True))
 
         @self.bot.slash_command(
             name='daily',
@@ -536,6 +568,11 @@ class FameBot:
                 return
             self.on_maintenance = value
 
+            await ctx.respond(embed=self.get_base_embed(
+                ctx.author, f'Maintenance {"activated" if value else "disabled"}!',
+                description='Only admins are able to use the bot while active.'), ephemeral=True
+            )
+
         @self.bot.slash_command(
             name='recap',
             description='Generates a recap for a given time frame!'
@@ -544,29 +581,7 @@ class FameBot:
             if not await self.check_permissions(ctx, False):
                 return
 
-            recap = self.get_recap(scope)
-            point_values, vote_values = self.get_top_countries(scope)
-            point_str, vote_str = str(), str()
-            for alpha2 in point_values:
-                c_data = recap.get(alpha2)
-                c_name = alpha2_to_country(alpha2)
-                point_count, point_dpos = c_data[POINTS], self.get_rank(alpha2, POINTS, c_data['dpos_points'])
-                point_rank = self.get_rank(alpha2, POINTS, scope)
-                if point_count == 0: continue
-                point_str += format_country_ranking(c_name, point_rank, point_count, POINTS, point_dpos, True) + '\n'
-
-            for alpha2 in vote_values:
-                c_data = recap.get(alpha2)
-                c_name = alpha2_to_country(alpha2)
-                vote_count, vote_dpos = c_data[VOTES], self.get_rank(alpha2, VOTES, c_data['dpos_votes'])
-                vote_rank = self.get_rank(alpha2, VOTES, scope)
-                if vote_count == 0: continue
-                vote_str += format_country_ranking(c_name, vote_rank, vote_count, VOTES, vote_dpos, True) + '\n'
-
-            embed = self.get_base_embed(ctx.author, title=f'Top {scope.lower()} countries')
-            embed.add_field(name='Points', value=point_str, inline=True)
-            embed.add_field(name='Votes', value=vote_str, inline=True)
-            await ctx.respond(embed=embed)
+            await ctx.respond(**self.do_recap(ctx, scope))
 
         @user_cmds.command(
             name='info',
@@ -582,7 +597,7 @@ class FameBot:
             embed.add_field(name='Leveling', value=fame_user.leveling_formatted, inline=False)
             embed.add_field(name='Total votes', value=str(fame_user.total_votes), inline=True)
             embed.add_field(name='Total points', value=str(fame_user.total_points), inline=True)
-            embed.set_thumbnail(url=user.avatar.url)
+            embed.set_thumbnail(url=user.avatar.url if user.avatar else user.default_avatar.url)
             await ctx.respond(embed=embed)
 
         @self.bot.slash_command(
