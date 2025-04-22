@@ -351,7 +351,7 @@ class FameBot:
         point_strs, vote_strs = sort_dict(point_strs), sort_dict(vote_strs)
         point_str, vote_str = '\n'.join(list(point_strs.keys())[:20]), '\n'.join(list(vote_strs.keys())[:20])
 
-        embed = self.get_base_embed(ctx.author, title=f'Top {scope.lower()} countries')
+        embed = self.get_base_embed(ctx.author, title=f'🌍 Top {scope.lower()} {"continents" if continents else "countries"}')
         embed.add_field(name='Points', value=point_str, inline=True)
         embed.add_field(name='Votes', value=vote_str, inline=True)
 
