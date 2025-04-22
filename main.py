@@ -1,5 +1,4 @@
 import asyncio
-import shutil
 from math import ceil
 
 from data import FameUser, load_data, save_data, flags_dir, DATA_PRESET, get_flag, get_banner, get_flag_path, \
@@ -15,6 +14,7 @@ from dotenv import load_dotenv
 from pathlib import Path
 from discord import default_permissions, ApplicationContext, Interaction, Button, User, Guild, Member, Option, File, \
     Embed, Colour, ButtonStyle, ui, Bot, Intents, SlashCommandGroup
+from discord.ext import tasks
 
 from typing import Tuple, List, Iterator, Dict, Any
 
@@ -355,7 +355,24 @@ class FameBot:
         embed.add_field(name='Points', value=point_str, inline=True)
         embed.add_field(name='Votes', value=vote_str, inline=True)
 
-        return {'embed': embed}
+        return {'embed': embed}@tasks.loop(seconds=1, count=1000)
+
+    @tasks.loop(seconds=1)
+    async def recap_task(self):
+        while True:
+            dt = datetime.datetime.now()
+            if dt.minute == 0 and dt.hour == 0:
+                recaps_to_clear = []
+                recaps_to_clear.append('daily')
+                if dt.weekday() == 0:
+                    recaps_to_clear.append('weekly')
+                if dt.day == 0:
+                    recaps_to_clear.append('monthly')
+                    # TODO add seasonal clear here
+                clear_database(recaps=recaps_to_clear)
+                await asyncio.sleep(100)
+            else:
+                await asyncio.sleep(5)
 
     def register_cmds(self):
         country_cmds = SlashCommandGroup('country', 'country-related commands')
@@ -635,6 +652,7 @@ class FameBot:
     def run(self):
         self.bot = Bot(intents=Intents.default())
         self.register_cmds()
+        self.recap_task.start()
         self.bot.run(os.getenv('TOKEN'))
 
         # failsafe to prevent data loss
@@ -642,8 +660,8 @@ class FameBot:
         for obj in list(self.loaded_users.values()) + list(self.loaded_recaps.values()):
             obj.save()
 
-
 if __name__ == '__main__':
+
     load_dotenv()
     bot = FameBot()
     bot.run()
