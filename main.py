@@ -648,7 +648,7 @@ class FameBot:
             await ctx.respond(embeds=(embed1, embed2, embed3, embed4), ephemeral=True)
 
         @self.bot.slash_command(
-            name='analyse_votes'
+            name='analyse'
         )
         async def analyse_cmd(ctx: ApplicationContext):
             if not await self.check_permissions(ctx, True):
@@ -694,7 +694,6 @@ class FameBot:
 
     def run(self):
         intents = Intents.default()
-        intents.members = True
         self.bot = Bot(intents=intents)
         self.register_cmds()
         self.recap_task.start()

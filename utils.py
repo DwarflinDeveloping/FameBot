@@ -29,8 +29,7 @@ ALTERNATIVE_CNAMES = {
     'Tanzania': 'TZ',
     'Venezuela': 'VE',
     'Bolivia': 'BO',
-    'DR Congo': 'CD',
-
+    'DR Congo': 'CD'
 }
 
 def alpha2_to_country(alpha2: str) -> str:

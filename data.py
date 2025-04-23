@@ -1,5 +1,6 @@
 import asyncio
 import json
+import math
 import os
 from copy import deepcopy
 from math import floor
@@ -215,8 +216,20 @@ class FameUser:
         self.next_vote = time() + cooldown
 
     @property
-    def leveling(self) -> float:
-        return (self.start_xp + self.total_votes * 10 + self.additional_xp) / 100
+    def xp(self):
+        return self.start_xp + self.total_votes * 10 + self.additional_xp
+
+    @property
+    def xp_per_level(self) -> float:
+        return 100 * pow(1.015, self.xp / 100)
+
+    @property
+    def leveling(self):
+        base = 1.2
+        numerator = self.xp * math.log(base)
+        inner = 1 + (numerator / 1000)
+        level = 10 * (math.log(inner) / math.log(base))
+        return level
 
     @property
     def points_per_vote(self) -> int:
