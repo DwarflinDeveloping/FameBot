@@ -362,13 +362,15 @@ class FameBot:
         while True:
             dt = datetime.datetime.now()
             if dt.minute == 0 and dt.hour == 0:
-                recaps_to_clear = []
-                recaps_to_clear.append('daily')
+                recaps_to_clear = ['daily']
                 if dt.weekday() == 0:
                     recaps_to_clear.append('weekly')
                 if dt.day == 0:
                     recaps_to_clear.append('monthly')
                     # TODO add seasonal clear here
+
+                for recap in recaps_to_clear:
+                    del self.loaded_recaps[recap]
                 clear_database(recaps=recaps_to_clear)
                 await asyncio.sleep(100)
             else:
