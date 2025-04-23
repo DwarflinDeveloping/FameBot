@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+from copy import deepcopy
 from math import floor
 from os import PathLike
 from pathlib import Path
@@ -36,7 +37,7 @@ DATA_PRESET = {
 }
 
 USER_DATA_PRESET = {
-    'total': PV_PRESET.copy(),
+    'total': deepcopy(PV_PRESET),
     'alltime_country': {},
     'additional_xp': 0,
     'next_vote': None,
@@ -84,9 +85,9 @@ class FameRecap:
         if file_path.is_file():
             recap_data = json.loads(file_path.read_text())
         else:
-            recap_data = RECAP_DATA_PRESET.copy()
+            recap_data = deepcopy(RECAP_DATA_PRESET)
             if scope == 'alltime':
-                recap_data['country'] = COUNTRY_DATA_PRESET
+                recap_data['country'] = deepcopy(COUNTRY_DATA_PRESET)
             recap_data['start_timestamp'] = time()
         return cls(recap_data, scope)
 
@@ -136,7 +137,7 @@ class FameUser:
         if file_path.is_file():
             user_data = json.loads(file_path.read_text())
         else:
-            user_data = USER_DATA_PRESET.copy()
+            user_data = deepcopy(USER_DATA_PRESET)
         return cls(user_data, user_id)
 
     @property

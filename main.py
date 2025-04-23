@@ -1,8 +1,10 @@
 import asyncio
+from copy import deepcopy
+import json
 from math import ceil
 
 from data import FameUser, load_data, save_data, flags_dir, DATA_PRESET, get_flag, get_banner, get_flag_path, \
-    get_banner_path, FameRecap, recaps_dir, users_dir, clear_database
+    get_banner_path, FameRecap, recaps_dir, users_dir, clear_database, USER_DATA_PRESET, PV_PRESET
 from utils import sort_dict, alpha2_to_country, country_to_alpha2, ALTERNATIVE_CNAMES, incr_symbol, \
     millify, get_rank_symbol, CONTINENT_CODE_TO_NAME, points_per_capita, country_to_continent, format_country_ranking, \
     format_cname, POINTS, VOTES, CTYPES, ALPHA2_COUNTRIES, ALPHA2_CONTINENTS
@@ -13,7 +15,7 @@ from time import time
 from dotenv import load_dotenv
 from pathlib import Path
 from discord import default_permissions, ApplicationContext, Interaction, Button, User, Guild, Member, Option, File, \
-    Embed, Colour, ButtonStyle, ui, Bot, Intents, SlashCommandGroup
+    Embed, Colour, ButtonStyle, ui, Bot, Intents, SlashCommandGroup, TextChannel
 from discord.ext import tasks
 
 from typing import Tuple, List, Iterator, Dict, Any
@@ -189,8 +191,6 @@ class FameBot:
 
         new_order = (self.get_order(POINTS), self.get_order(VOTES))
         self.update_recap_ranks(prev_order, new_order)
-
-        self.save_data()
         return points_incr
 
     def get_country_stats(self, alpha2: str, scope: str = 'alltime') -> Tuple[int, int, int, int]:
@@ -355,7 +355,7 @@ class FameBot:
         embed.add_field(name='Points', value=point_str, inline=True)
         embed.add_field(name='Votes', value=vote_str, inline=True)
 
-        return {'embed': embed}@tasks.loop(seconds=1, count=1000)
+        return {'embed': embed}
 
     @tasks.loop(seconds=1)
     async def recap_task(self):
@@ -428,7 +428,7 @@ class FameBot:
             if not await self.check_permissions(ctx, True):
                 return
 
-            # self.data = DATA_PRESET.copy()
+            # self.data = deepcopy(DATA_PRESET)
             self.loaded_recaps, self.loaded_users = {}, {}
 
             kwargs = {}
@@ -558,7 +558,6 @@ class FameBot:
             points_incr = self.do_vote(fame_user, alpha2, self.daily_votes)
             # if ctx.author.id not in self.users_role_checked:
             await self.check_roles(ctx, fame_user)
-            self.save_data()
 
             vote_count, point_count, vote_rank, points_rank = self.get_country_stats(alpha2)
             fame_user.update_daily_claim()
@@ -622,6 +621,9 @@ class FameBot:
             description='View your own profile!'
         )
         async def me_cmd(ctx: ApplicationContext):
+            if not await self.check_permissions(ctx, False):
+                return
+
             await uinfo_cmd(ctx, ctx.user)
 
         @self.bot.slash_command(
@@ -645,12 +647,55 @@ class FameBot:
             embed4 = Embed(title='Click here to join', url='https://discord.com/invite/VP8yFSYJWw')
             await ctx.respond(embeds=(embed1, embed2, embed3, embed4), ephemeral=True)
 
+        @self.bot.slash_command(
+            name='analyse_votes'
+        )
+        async def analyse_cmd(ctx: ApplicationContext):
+            if not await self.check_permissions(ctx, True):
+                return
+
+            await ctx.defer(ephemeral=True)
+            await self.fetch_votes(ctx.channel)
+            await ctx.respond('analysis finished!', ephemeral=True)
+
         self.bot.add_application_command(country_cmds)
         self.bot.add_application_command(top_cmds)
         self.bot.add_application_command(user_cmds)
 
+    async def fetch_votes(self, channel: TextChannel):
+        Path('users2').mkdir(exist_ok=True)
+        user_data = {}
+
+        bot_id = self.bot.user.id
+        for i, message in enumerate(await channel.history(limit=100).flatten()):
+            if not message.author.id == bot_id or not message.embeds:
+                continue
+
+            embed = message.embeds[0]
+            user = message.guild.get_member_named(embed.footer.text)
+            title, user_id = embed.title, user.id
+            if not 'registered!' in title:
+                continue
+            cname = title.split('Vote for', maxsplit=1)[1].split(':flag', maxsplit=1)[0].strip()
+            points_count = int(title.split('▲', maxsplit=1)[1].split('pt.', maxsplit=1)[0].strip())
+            alpha2 = country_to_alpha2(cname)
+
+            if user_id not in user_data:
+                user_data[user_id] = deepcopy(USER_DATA_PRESET)
+            if alpha2 not in user_data[user_id]['alltime_country']:
+                user_data[user_id]['alltime_country'][alpha2] = PV_PRESET.copy()
+            user_data[user_id]['total']['votes'] += 1
+            user_data[user_id]['total']['points'] += points_count
+            user_data[user_id]['alltime_country'][alpha2]['votes'] += 1
+            user_data[user_id]['alltime_country'][alpha2]['points'] += points_count
+
+        for user_id, udata in user_data.items():
+            Path('users2', f'{user_id}.json').write_text(json.dumps(udata, indent=2))
+
     def run(self):
-        self.bot = Bot(intents=Intents.default())
+        intents = Intents.default()
+        intents.members = True
+        self.bot = Bot(intents=intents)
         self.register_cmds()
         self.recap_task.start()
         self.bot.run(os.getenv('TOKEN'))
@@ -661,7 +706,6 @@ class FameBot:
             obj.save()
 
 if __name__ == '__main__':
-
     load_dotenv()
     bot = FameBot()
     bot.run()
