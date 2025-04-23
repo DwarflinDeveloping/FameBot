@@ -19,7 +19,18 @@ ALTERNATIVE_CNAMES = {
     'Turkey': 'TR',
     'Russia': 'RU',
     'Bosnia': 'BA',
-    'BES Islands': 'BQ'
+    'BES Islands': 'BQ',
+    'Micronesia': 'FM',
+    'Iran': 'IR',
+    'North Korea': 'KP',
+    'South Korea': 'KR',
+    'Moldova': 'MD',
+    'Palestine': 'PS',
+    'Tanzania': 'TZ',
+    'Venezuela': 'VE',
+    'Bolivia': 'BO',
+    'DR Congo': 'CD',
+
 }
 
 def alpha2_to_country(alpha2: str) -> str:

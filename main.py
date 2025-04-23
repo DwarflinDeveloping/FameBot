@@ -667,7 +667,7 @@ class FameBot:
         user_data = {}
 
         bot_id = self.bot.user.id
-        for i, message in enumerate(await channel.history(limit=100).flatten()):
+        for i, message in enumerate(await channel.history(limit=None).flatten()):
             if not message.author.id == bot_id or not message.embeds:
                 continue
 
