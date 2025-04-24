@@ -58,21 +58,21 @@ PROGRESSION_ROLES = {
     40: 1363922324612448469,   # Silver 2
     50: 1363922416111321478,   # Silver 3
     60: 1363310802060447804,   # Gold 1
-    100: 1363310895580709017,  # Gold 2
-    130: 1363311104364773596,  # Gold 3
-    160: 1363311311924101180,  # Diamond 1
-    200: 1363311794533437540,  # Diamond 2
-    250: 1363312217298305304,  # Diamond 3
-    300: 1363312348424568932,  # Mythic 1
-    375: 1363312436232323123,  # Mythic 2
-    450: 1363312587449569551,  # Mythic 3
-    525: 1363312813531070595,  # Legendary 1
-    600: 1363312962009301202,  # Legendary 2
-    675: 1363313105165095175,  # Legendary 3
-    750: 1363313333511389296,  # Masters 1
-    825: 1363922924066832504, # Masters 2
-    900: 1363923020774641916, # Masters 3
-    1000: 1363323340764479620  # Pro Member
+    70: 1363310895580709017,  # Gold 2
+    80: 1363311104364773596,  # Gold 3
+    90: 1363311311924101180,  # Diamond 1
+    100: 1363311794533437540,  # Diamond 2
+    110: 1363312217298305304,  # Diamond 3
+    120: 1363312348424568932,  # Mythic 1
+    130: 1363312436232323123,  # Mythic 2
+    140: 1363312587449569551,  # Mythic 3
+    150: 1363312813531070595,  # Legendary 1
+    170: 1363312962009301202,  # Legendary 2
+    190: 1363313105165095175,  # Legendary 3
+    210: 1363313333511389296,  # Masters 1
+    230: 1363922924066832504, # Masters 2
+    250: 1363923020774641916, # Masters 3
+    270: 1363323340764479620  # Pro Member
 }
 
 @dataclasses.dataclass
@@ -243,7 +243,8 @@ class FameUser:
         for requirement in PROGRESSION_ROLES:
             if self.leveling >= requirement:
                 yield PROGRESSION_ROLES[requirement]
-            break
+            else:
+                break
 
     @property
     def leveling_formatted(self) -> str:
@@ -262,14 +263,14 @@ def clear_folder(dir_path: PathLike):
     for file in os.listdir(dir_path):
         os.remove(Path(dir_path, file))
 
-def clear_database(users: bool = False, recaps: List[str] | bool = False):
+async def clear_database(users: bool = False, recaps: List[str] | bool = False):
     if users is True:
         clear_folder(users_dir)
     if type(recaps) == bool and recaps is True:
         clear_folder(recaps_dir)
     elif type(recaps) == list:
         for scope in recaps:
-            os.remove(Path(recaps_dir, f'{scope}.json'))
+            Path(recaps_dir, f'{scope}.json').unlink(missing_ok=True)
 
 def get_flag_path(alpha2: str):
     return Path(flags_dir, alpha2 + '.png')

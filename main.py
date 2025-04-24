@@ -15,7 +15,7 @@ from time import time
 from dotenv import load_dotenv
 from pathlib import Path
 from discord import default_permissions, ApplicationContext, Interaction, Button, User, Guild, Member, Option, File, \
-    Embed, Colour, ButtonStyle, ui, Bot, Intents, SlashCommandGroup, TextChannel
+    Embed, Colour, ButtonStyle, ui, Bot, Intents, SlashCommandGroup, TextChannel, ClientUser, InputTextStyle
 from discord.ext import tasks
 
 from typing import Tuple, List, Iterator, Dict, Any
@@ -34,7 +34,7 @@ class FameBot:
 
         self.bot: Bot | None = None
         self.data = load_data()
-        self.users_role_checked = []
+        self.role_checks: List[int] = []
         self.loaded_users: Dict[int, FameUser] = {}
         self.loaded_recaps: Dict[str, FameRecap] = {}
 
@@ -176,6 +176,7 @@ class FameBot:
 
     def do_vote(self, user: FameUser, alpha2: str, votes_count: int) -> int:
         prev_order = (self.get_order(POINTS), self.get_order(VOTES))
+        old_level = user.points_per_vote
 
         points_incr = user.points_per_vote * votes_count
         user.total_votes += votes_count
@@ -190,7 +191,10 @@ class FameBot:
             recap.save()
 
         new_order = (self.get_order(POINTS), self.get_order(VOTES))
+        new_level = user.points_per_vote
         self.update_recap_ranks(prev_order, new_order)
+        if old_level != new_level:
+            self.role_checks.append(user.user_id)
         return points_incr
 
     def get_country_stats(self, alpha2: str, scope: str = 'alltime') -> Tuple[int, int, int, int]:
@@ -290,10 +294,13 @@ class FameBot:
         return False
 
     async def check_roles(self, ctx: ApplicationContext | Interaction, fame_user: FameUser):
-        if type(ctx) == ApplicationContext:
-            user, guild, channel = ctx.author, ctx.guild, ctx.channel
-        else:
-            user, guild, channel = ctx.user, ctx.guild, ctx.channel
+        if fame_user.user_id not in self.role_checks:
+            return
+
+        print('checking roles!')
+        guild, channel = ctx.guild, ctx.channel
+        user = ctx.author if type(ctx) == ApplicationContext else ctx.user
+
         if type(user) == Member and guild.id == 378587218849300481:  # only role checking on the FAME server
             for role_id in fame_user.roles:
                 role = guild.get_role(role_id)
@@ -301,9 +308,9 @@ class FameBot:
                     await user.add_roles(role)
                     await channel.send(f'{ctx.user.mention} has reached {fame_user.total_votes} votes! You are now a {role.name}!')
 
-        self.users_role_checked.append(user.id)
+        self.role_checks.remove(fame_user.user_id)
 
-    def do_recap(self, ctx: ApplicationContext, scope: str, continents: bool = False) -> Dict[str, Any]:
+    def do_recap(self, user: Member | User | ClientUser, scope: str, continents: bool = False) -> Dict[str, Any]:
         recap = self.get_recap(scope)
         is_recap = scope != 'alltime' and not continents
         point_values, vote_values = None, None
@@ -332,49 +339,36 @@ class FameBot:
             if vote_count != 0 or continents:
                 vote_strs[format_country_ranking(c_name, vote_rank, vote_count, VOTES, vote_dpos, is_recap)] = vote_count
 
-        """for alpha2 in point_values:
-            c_data = recap.get(alpha2)
-            c_name = alpha2_to_country(alpha2)
-            point_count, point_dpos = c_data[POINTS], self.get_rank(alpha2, POINTS, c_data['dpos_points'])
-            point_rank = self.get_rank(alpha2, POINTS, scope)
-            if point_count == 0: continue
-            point_strs.append(format_country_ranking(format_cname(alpha2, c_name), point_rank, point_count, POINTS, point_dpos if recap else None, is_recap))
-
-        for alpha2 in vote_values:
-            c_data = recap.get(alpha2)
-            c_name = alpha2_to_country(alpha2)
-            vote_count, vote_dpos = c_data[VOTES], self.get_rank(alpha2, VOTES, c_data['dpos_votes'])
-            vote_rank = self.get_rank(alpha2, VOTES, scope)
-            if vote_count == 0: continue
-            vote_strs.append(format_country_ranking(format_cname(alpha2, c_name), vote_rank, vote_count, POINTS, vote_dpos if recap else None, is_recap))"""
-
         point_strs, vote_strs = sort_dict(point_strs), sort_dict(vote_strs)
         point_str, vote_str = '\n'.join(list(point_strs.keys())[:20]), '\n'.join(list(vote_strs.keys())[:20])
 
-        embed = self.get_base_embed(ctx.author, title=f'🌍 Top {scope.lower()} {"continents" if continents else "countries"}')
+        embed = self.get_base_embed(user, title=f'🌍 Top {scope.lower()} {"continents" if continents else "countries"}')
         embed.add_field(name='Points', value=point_str, inline=True)
         embed.add_field(name='Votes', value=vote_str, inline=True)
 
         return {'embed': embed}
 
-    @tasks.loop(seconds=1)
+    @tasks.loop(seconds=5)
     async def recap_task(self):
-        while True:
-            dt = datetime.datetime.now()
-            if dt.minute == 0 and dt.hour == 0:
-                recaps_to_clear = ['daily']
-                if dt.weekday() == 0:
-                    recaps_to_clear.append('weekly')
-                if dt.day == 0:
-                    recaps_to_clear.append('monthly')
-                    # TODO add seasonal clear here
+        await self.bot.wait_until_ready()
+        dt = datetime.datetime.now()
+        if not dt.minute == 0 or not dt.hour == 0:
+            return
 
-                for recap in recaps_to_clear:
-                    del self.loaded_recaps[recap]
-                clear_database(recaps=recaps_to_clear)
-                await asyncio.sleep(100)
-            else:
-                await asyncio.sleep(5)
+        recaps = {'daily': 1363171417612353658}
+        if dt.weekday() == 0:
+            recaps['weekly'] = 1363171435962433768
+        if dt.day == 0:
+            recaps['monthly'] = 1363171461954670632
+        # TODO add seasonal clear here
+
+        for scope, channel_id in recaps.items():
+            recaps_channel = self.bot.get_channel(channel_id)
+            await recaps_channel.send(**self.do_recap(self.bot.user, scope))
+            del self.loaded_recaps[scope]
+
+        await clear_database(recaps=list(recaps.keys()))
+        await asyncio.sleep(100)
 
     def register_cmds(self):
         country_cmds = SlashCommandGroup('country', 'country-related commands')
@@ -440,7 +434,7 @@ class FameBot:
                 kwargs['users'] = True
             else:
                 kwargs['recaps'] = [scope]
-            clear_database(**kwargs)
+            await clear_database(**kwargs)
 
             await ctx.respond(embed=self.get_base_embed(ctx.author, f'{scope.capitalize()} cleared', description='Hope you know what you are doing!'), ephemeral=True)
 
@@ -521,7 +515,7 @@ class FameBot:
             if not await self.check_permissions(ctx, False):
                 return
 
-            await ctx.respond(**self.do_recap(ctx, 'alltime'))
+            await ctx.respond(**self.do_recap(ctx.user, 'alltime'))
 
         @top_cmds.command(
             name='continent',
@@ -531,7 +525,7 @@ class FameBot:
             if not await self.check_permissions(ctx, False):
                 return
 
-            await ctx.respond(**self.do_recap(ctx, 'alltime', continents=True))
+            await ctx.respond(**self.do_recap(ctx.user, 'alltime', continents=True))
 
         @self.bot.slash_command(
             name='daily',
@@ -599,7 +593,7 @@ class FameBot:
             if not await self.check_permissions(ctx, False):
                 return
 
-            await ctx.respond(**self.do_recap(ctx, scope))
+            await ctx.respond(**self.do_recap(ctx.user, scope))
 
         @user_cmds.command(
             name='info',
