@@ -1,24 +1,25 @@
 import asyncio
-from copy import deepcopy
+import datetime
 import json
-from math import ceil
+import os
+import random
+from copy import deepcopy
+from math import ceil, floor
+from pathlib import Path
+from time import time
+from typing import Tuple, List, Dict, Any, Iterator
 
-from data import FameUser, load_data, save_data, flags_dir, DATA_PRESET, get_flag, get_banner, get_flag_path, \
-    get_banner_path, FameRecap, recaps_dir, users_dir, clear_database, USER_DATA_PRESET, PV_PRESET
+import discord
+from discord import default_permissions, ApplicationContext, Interaction, Button, User, Member, Option, File, \
+    Embed, Colour, ButtonStyle, ui, Bot, Intents, SlashCommandGroup, TextChannel, ClientUser
+from discord.ext import tasks
+from dotenv import load_dotenv
+
+from data import FameUser, load_data, save_data, flags_dir, get_flag, get_banner, \
+    get_banner_path, FameRecap, users_dir, clear_database, USER_DATA_PRESET, PV_PRESET, boosters
 from utils import sort_dict, alpha2_to_country, country_to_alpha2, ALTERNATIVE_CNAMES, incr_symbol, \
     millify, get_rank_symbol, CONTINENT_CODE_TO_NAME, points_per_capita, country_to_continent, format_country_ranking, \
-    format_cname, POINTS, VOTES, CTYPES, ALPHA2_COUNTRIES, ALPHA2_CONTINENTS
-
-import datetime
-import os
-from time import time
-from dotenv import load_dotenv
-from pathlib import Path
-from discord import default_permissions, ApplicationContext, Interaction, Button, User, Guild, Member, Option, File, \
-    Embed, Colour, ButtonStyle, ui, Bot, Intents, SlashCommandGroup, TextChannel, ClientUser, InputTextStyle
-from discord.ext import tasks
-
-from typing import Tuple, List, Dict, Any, Iterator
+    format_cname, POINTS, VOTES, CTYPES, ALPHA2_COUNTRIES
 
 
 class FameBot:
@@ -122,18 +123,12 @@ class FameBot:
         self.loaded_recaps[scope] = recap
         return recap
 
-    def get_top_users(self, alpha2: str | None = None) -> Tuple[Dict[str, int], Dict[int, int]]:
-        point_values, vote_values = dict(), dict()
+    def get_top_users(self) -> Dict[int, int]:
+        level_values = dict()
         for user in self.users:
-            if alpha2:
-                cdata = user.get_country(alpha2)
-                point_values[user.user_id] = cdata[POINTS]
-                vote_values[user.user_id] = cdata[VOTES]
-            else:
-                point_values[user.user_id] = user.total_points
-                vote_values[user.user_id] = user.total_votes
+            level_values[user.user_id] = user.points_per_vote
 
-        return sort_dict(point_values), sort_dict(vote_values)
+        return sort_dict(level_values)
 
     def get_top_countries(self, scope: str) -> Tuple[Dict[str, int], Dict[str, int]]:
         recap = self.get_recap(scope)
@@ -200,6 +195,23 @@ class FameBot:
             if changes:
                 recap.save()
 
+    async def spawn_boosters(self, user: FameUser) -> discord.Embed | None:
+        user.check_starter_booster()
+        chances = list(booster.spawn_chance for booster in boosters)
+        chances.append(1 - sum(chances))
+        result = random.choices(list(boosters) + [None], weights=chances, k=1)[0]
+        if result is None:
+            return None
+        booster = result
+        user.add_booster(booster)
+        embed = discord.Embed(
+            title=f':mag_right: You have found a {booster.name} ({booster.boost*100}%)!',
+            colour=booster.color,
+            description=f'This booster lasts for {booster.duration} votes.\n'
+                        'View your boosters using **/boosters**'
+        )
+        return embed
+
     def do_vote(self, user: FameUser, alpha2: str, votes_count: int) -> int:
         prev_order = (self.get_order(POINTS), self.get_order(VOTES))
         old_level = user.points_per_vote
@@ -261,8 +273,8 @@ class FameBot:
 
         class VoteView(ui.View):
             @ui.button(label='Vote again', style=ButtonStyle.primary, custom_id='again',
-                               disabled=False if self.cooldown == 0 else True)
-            async def button_callback(self2, button: Button, interaction: Interaction):
+                       disabled=False if self.cooldown == 0 else True)
+            async def again_callback(self2, button: Button, interaction: Interaction):
                 if interaction.user.id != user.id:
                     await interaction.respond(embed=self.get_base_embed(user, f'This is {user.name}\'s voting window! Make your own one using /cvote', error=True), ephemeral=True)
                     return
@@ -285,7 +297,10 @@ class FameBot:
                 button.disabled = True
                 await interaction.edit(view=view)
 
+                booster_embed = await self.spawn_boosters(_fame_user)
                 _vote_args = self.vote_args(alpha2, c_name, _fame_user, user)
+                if booster_embed:
+                    _vote_args['embeds'].append(booster_embed)
                 # if interaction.user.id not in self.users_role_checked:
                 await self.check_roles(interaction, fame_user)
                 new_resp = await interaction.respond(**_vote_args)
@@ -298,6 +313,11 @@ class FameBot:
                 _vote_args['view'].set_again_state(False)
                 await new_resp.edit(view=_vote_args['view'])
 
+            if fame_user.boosters_available:
+                @ui.button(label='Boosters available', style=ButtonStyle.red, custom_id='boosters')
+                async def boosters_callback(self2, button: Button, interaction: Interaction):
+                    await interaction.respond(**self.booster_args(interaction))
+
             def set_again_state(self, value: bool):
                 for item in self.children:
                     if type(item) == ui.Button and item.custom_id == 'again':
@@ -306,11 +326,34 @@ class FameBot:
 
         view = VoteView()
         vote_args = vote_args | {
-            'embed': embed,
+            'embeds': [embed],
             'view': view
         }
 
         return vote_args
+
+    def booster_args(self, ctx: ApplicationContext | Interaction):
+        fame_user = self.get_user(ctx.user.id)
+        embed = discord.Embed(
+            title='Your Boosters'
+        )
+        for booster in fame_user.boosters:
+            embed.add_field(name=f'{booster.count}x {booster.symbol} {booster.name}',
+                            value=f'Boost factor: {floor(booster.boost*100)}% (10xp -> {floor(10 * (1 + booster.boost))}xp)\n'
+                                  f'Duration: {booster.duration} votes',
+                            inline=False)
+
+        class BoosterSelect(discord.ui.View):
+            @discord.ui.select(
+                options=[discord.SelectOption(label=b.name, emoji=b.symbol) for b in fame_user.boosters],
+                placeholder='Select a booster to activate',
+                max_values=1,
+                min_values=1,
+            )
+            async def select_callback(self2, select, interaction: Interaction):
+                pass
+
+        return {'embed': embed, 'view': BoosterSelect()}
 
     async def check_permissions(self, ctx: ApplicationContext | Interaction, admin_only: bool) -> bool:
         if admin_only and ctx.user.id not in self.admin_ids:
@@ -346,18 +389,23 @@ class FameBot:
         if topic == 'countries':
             recap = self.get_recap(scope)
             point_values, vote_values = self.get_top_countries(scope)
+            values = {'points': point_values, 'votes': vote_values}
         elif topic == 'continents':
             point_values, vote_values = self.get_top_continents(scope)
+            values = {'points': point_values, 'votes': vote_values}
         elif topic == 'users':
-            point_values, vote_values = self.get_top_users()
+            values = {'levels': self.get_top_users()}
         else:
             raise AssertionError
 
         max_pages = 0
         embed = self.get_base_embed(user, title=f':earth_africa: Top {scope.lower()} {topic}')
-        for ctype, data in {'points': point_values, 'votes': vote_values}.items():
+        for ctype, data in values.items():
             str_list = []
             for item_indicator, count in data.items():
+                if count == 0:
+                    continue
+
                 rank = list(data.keys()).index(item_indicator) + 1
                 if topic in ['countries', 'continents']:
                     alpha2 = item_indicator
@@ -371,9 +419,6 @@ class FameBot:
                     else:
                         cname = CONTINENT_CODE_TO_NAME[alpha2]
 
-                    if count == 0:
-                        continue
-
                     ranking_str = format_country_ranking(cname, rank, count, ctype, dpos)
 
                 else:
@@ -386,13 +431,11 @@ class FameBot:
 
                 str_list.append(ranking_str)
 
-            print(len(str_list))
             max_pages = max(max_pages, ceil(len(str_list) / 20))
-
             full_str = '\n'.join(str_list[(page-1)*entries_per_page:page*entries_per_page])
             embed.add_field(name=ctype.capitalize(), value=full_str, inline=True)
 
-        class LeaderoardView(ui.View):
+        class LeaderboardView(ui.View):
             @staticmethod
             async def modify_page(interaction: Interaction, page_n: int):
                 await interaction.edit(**await self.generate_leaderboard(user, scope, topic, page_n, entries_per_page))
@@ -407,35 +450,8 @@ class FameBot:
             async def next_btn(self2, button: Button, interaction: Interaction):
                 await self2.modify_page(interaction, page + 1)
 
-
-        """point_values, vote_values = None, None
-        if continents:
-            point_values, vote_values = self.get_top_continents(scope)
-        point_strs, vote_strs = dict(), dict()
-
-        for alpha2 in ALPHA2_CONTINENTS if continents else ALPHA2_COUNTRIES:
-            vote_dpos, point_dpos = None, None
-
-            if continents:
-                c_name = CONTINENT_CODE_TO_NAME[alpha2]
-                point_count, vote_count = point_values[alpha2], vote_values[alpha2]
-                point_rank, vote_rank = list(point_values.keys()).index(alpha2) + 1, list(vote_values.keys()).index(alpha2) + 1
-
-            else:
-                c_data = recap.get(alpha2)
-                c_name = format_cname(alpha2, alpha2_to_country(alpha2))
-                point_count, vote_count = c_data[POINTS], c_data[VOTES]
-                point_rank, vote_rank = self.get_rank(alpha2, POINTS, scope), self.get_rank(alpha2, VOTES, scope)
-                if is_recap:
-                    vote_dpos, point_dpos = c_data['dpos_votes'], c_data['dpos_points']
-
-            if point_count != 0 or continents:
-                point_strs[format_country_ranking(c_name, point_rank, point_count, POINTS, point_dpos, is_recap)] = point_count
-            if vote_count != 0 or continents:
-                vote_strs[format_country_ranking(c_name, vote_rank, vote_count, VOTES, vote_dpos, is_recap)] = vote_count"""
-
         if max_pages > 1 and not is_recap :
-            view = LeaderoardView()
+            view = LeaderboardView()
         else:
             view = None
         return {'embed': embed, 'view': view}
@@ -493,7 +509,10 @@ class FameBot:
             except TypeError:
                 return
 
+            booster_embed = await self.spawn_boosters(user)
             vote_args = self.vote_args(alpha2, c_name, user, ctx.author)
+            if booster_embed:
+                vote_args['embeds'].append(booster_embed)
             # if ctx.author.id not in self.users_role_checked:
             await self.check_roles(ctx, user)
             await ctx.respond(**vote_args)
@@ -722,6 +741,16 @@ class FameBot:
                 return
 
             await uinfo_cmd(ctx, ctx.user)
+
+        @self.bot.slash_command(
+            name='boosters',
+            description='View your available boosters'
+        )
+        async def boosters_cmd(ctx: ApplicationContext):
+            if not await self.check_permissions(ctx, False):
+                return
+
+            await ctx.respond(**self.booster_args(ctx))
 
         @self.bot.slash_command(
             name='help',

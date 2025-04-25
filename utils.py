@@ -29,7 +29,9 @@ ALTERNATIVE_CNAMES = {
     'Tanzania': 'TZ',
     'Venezuela': 'VE',
     'Bolivia': 'BO',
-    'DR Congo': 'CD'
+    'DR Congo': 'CD',
+    'China (PRC)': 'CN',
+    'Taiwan (ROC)': 'TW',
 }
 
 def alpha2_to_country(alpha2: str) -> str:
@@ -106,7 +108,19 @@ def format_country_ranking(c_name: str, rank: int, count: int, ctype: str, dpos:
 
 CNAME_IMPROVEMENTS = {
     'Russian Federation': 'Russia',
-    'Bonaire, Sint Eustatius and Saba': 'BES Islands'
+    'Bonaire, Sint Eustatius and Saba': 'BES Islands',
+    'Micronesia, Federated States of': 'Micronesia',
+    'Iran, Islamic Republic of': 'Iran',
+    'Korea, Democratic People\'s Republic of': 'North Korea',
+    'Korea, Republic of': 'South Korea',
+    'Moldova, Republic of': 'Moldova',
+    'Palestine, State of': 'Palestine',
+    'Tanzania, United Republic of': 'Tanzania',
+    'Venezuela, Bolivarian Republic of': 'Venezuela',
+    'Bolivia, Plurinational State of': 'Bolivia',
+    'Congo, The Democratic Republic of the': 'DR Congo',
+    'China': 'China (PRC)',
+    'Taiwan, Province of China': 'Taiwan (ROC)'
 }
 def improve_cname(cname: str):
     return CNAME_IMPROVEMENTS[cname] if cname in CNAME_IMPROVEMENTS else cname

@@ -8,7 +8,7 @@ from os import PathLike
 from pathlib import Path
 import dataclasses
 from time import time
-from typing import Dict, Self, Iterator, List
+from typing import Dict, Self, Iterator, List, Any, Type
 
 import discord
 import pycountry
@@ -42,7 +42,9 @@ USER_DATA_PRESET = {
     'alltime_country': {},
     'additional_xp': 0,
     'next_vote': None,
-    'daily_claim': None
+    'daily_claim': None,
+    'claims': [],
+    'boosters': {}
 }
 
 RECAP_DATA_PRESET = {
@@ -51,29 +53,92 @@ RECAP_DATA_PRESET = {
 }
 
 PROGRESSION_ROLES = {
-    0: 1363309917926064210,    # Bronze 1
-    10: 1363920859953103140,   # Bronze 2
-    20: 1363921907497308314,   # Bronze 3
-    30: 1363310545108996238,   # Silver 1
-    40: 1363922324612448469,   # Silver 2
-    50: 1363922416111321478,   # Silver 3
-    60: 1363310802060447804,   # Gold 1
+    0: 1363309917926064210,   # Bronze 1
+    10: 1363920859953103140,  # Bronze 2
+    20: 1363921907497308314,  # Bronze 3
+    30: 1363310545108996238,  # Silver 1
+    40: 1363922324612448469,  # Silver 2
+    50: 1363922416111321478,  # Silver 3
+    60: 1363310802060447804,  # Gold 1
     70: 1363310895580709017,  # Gold 2
     80: 1363311104364773596,  # Gold 3
     90: 1363311311924101180,  # Diamond 1
-    100: 1363311794533437540,  # Diamond 2
-    110: 1363312217298305304,  # Diamond 3
-    120: 1363312348424568932,  # Mythic 1
-    130: 1363312436232323123,  # Mythic 2
-    140: 1363312587449569551,  # Mythic 3
-    150: 1363312813531070595,  # Legendary 1
-    170: 1363312962009301202,  # Legendary 2
-    190: 1363313105165095175,  # Legendary 3
-    210: 1363313333511389296,  # Masters 1
+    100: 1363311794533437540, # Diamond 2
+    110: 1363312217298305304, # Diamond 3
+    120: 1363312348424568932, # Mythic 1
+    130: 1363312436232323123, # Mythic 2
+    140: 1363312587449569551, # Mythic 3
+    150: 1363312813531070595, # Legendary 1
+    170: 1363312962009301202, # Legendary 2
+    190: 1363313105165095175, # Legendary 3
+    210: 1363313333511389296, # Masters 1
     230: 1363922924066832504, # Masters 2
     250: 1363923020774641916, # Masters 3
     270: 1363323340764479620  # Pro Member
 }
+
+@dataclasses.dataclass
+class Booster:
+    name: str
+    boost: float
+    duration: int
+    spawn_chance: int
+    color: discord.Color
+    symbol: str = ''
+    count: int = 1
+
+    @classmethod
+    def from_name(cls, name: str) -> Type['Booster'] | None:
+        for booster in boosters:
+            if booster.name == name:
+                return booster
+        return None
+
+    """@classmethod
+    def from_data(cls, data: Dict[str, Any]) -> Self:
+        return cls(data['name'], data['boost'], data['duration'], data['count'])
+
+    def __iter__(self) -> Iterator[Tuple[str, Any]]:
+        yield 'name', self.name
+        yield 'boost', self.boost
+        yield 'duration', self.duration
+        yield 'color', self.color
+        yield 'count', self.count"""
+
+class StarterBooster(Booster):
+    name = 'Starter Booster'
+    symbol = '🔥'
+    boost = 4.00
+    duration = 100
+    spawn_chance = 0
+    color = discord.Color.dark_red()
+
+    def __init__(self, count: int = 1):
+        self.count = count
+
+class RoleUpBooster(Booster):
+    name = 'Role Up Booster'
+    symbol = '⏫'
+    boost = 0.50
+    duration = 20
+    spawn_chance = 0
+    color = discord.Color.yellow()
+
+    def __init__(self, count: int = 1):
+        self.count = count
+
+class VoteBooster(Booster):
+    name = 'Voting Booster'
+    symbol = '⬆️'
+    boost = 0.50
+    duration = 20
+    spawn_chance = 0.50
+    color = discord.Color.red()
+
+    def __init__(self, count: int = 1):
+        self.count = count
+
+boosters = (StarterBooster, RoleUpBooster, VoteBooster)
 
 @dataclasses.dataclass
 class FameRecap:
@@ -85,6 +150,9 @@ class FameRecap:
         file_path = Path(recaps_dir, f'{scope}.json')
         if file_path.is_file():
             recap_data = json.loads(file_path.read_text())
+            for key, preset_val in RECAP_DATA_PRESET.items():
+                if key not in recap_data:
+                    recap_data[key] = deepcopy(preset_val)
         else:
             recap_data = deepcopy(RECAP_DATA_PRESET)
             if scope == 'alltime':
@@ -137,6 +205,9 @@ class FameUser:
         file_path = Path(users_dir, f'{user_id}.json')
         if file_path.is_file():
             user_data = json.loads(file_path.read_text())
+            for key, preset_val in USER_DATA_PRESET.items():
+                if key not in user_data:
+                    user_data[key] = deepcopy(preset_val)
         else:
             user_data = deepcopy(USER_DATA_PRESET)
         return cls(user_data, user_id)
@@ -193,6 +264,27 @@ class FameUser:
         self.daily_claim = time()
 
     @property
+    def claims(self) -> List[Any]:
+        return self.data['claims']
+
+    @claims.setter
+    def claims(self, value: List[Any]) -> None:
+        self.data['claims'] = value
+
+    @property
+    def boosters(self) -> List[Booster]:
+        booster_list = list()
+        for name, count in self.data['boosters'].items():
+            if count != 0:
+                booster_list.append(Booster.from_name(name)(count=count))
+        return booster_list
+
+    def add_booster(self, booster: Booster):
+        if booster.name not in self.data['boosters']:
+            self.data['boosters'][booster.name] = 0
+        self.data['boosters'][booster.name] += booster.count
+
+    @property
     def next_vote(self) -> int | None:
         return self.data['next_vote']
 
@@ -203,6 +295,21 @@ class FameUser:
     @property
     def remaining_cooldown(self) -> float:
         return max(0, self.next_vote - time())
+
+    @property
+    def has_claimed_starter_booster(self) -> bool:
+        return 'Starter Booster' in self.claims
+
+    def check_starter_booster(self) -> None:
+        if self.has_claimed_starter_booster:
+            return
+        self.add_booster(StarterBooster())
+        self.claims.append('Starter Booster')
+        self.save()
+
+    @property
+    def boosters_available(self) -> bool:
+        return sum(self.data['boosters'].values()) > 0
 
     async def wait_cooldown(self) -> None:
         duration = self.remaining_cooldown if self.next_vote else 0
