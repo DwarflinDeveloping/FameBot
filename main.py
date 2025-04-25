@@ -18,16 +18,23 @@ from discord import default_permissions, ApplicationContext, Interaction, Button
     Embed, Colour, ButtonStyle, ui, Bot, Intents, SlashCommandGroup, TextChannel, ClientUser, InputTextStyle
 from discord.ext import tasks
 
-from typing import Tuple, List, Iterator, Dict, Any
+from typing import Tuple, List, Dict, Any, Iterator
 
 
 class FameBot:
-    def __init__(self, cooldown: float = 5, daily_votes: int = 30, recap_scopes=None, upload_images: bool = False):
+    def __init__(self, cooldown: float = 5, daily_votes: int = 30, recap_scopes: List[str] = None,
+                 leaderboard_topics: List[str] = None, upload_images: bool = False):
         if recap_scopes is None:
             self.visible_recap_scopes = ['daily', 'weekly', 'seasonal']
             self.recap_scopes = self.visible_recap_scopes + ['alltime']
         else:
             self.recap_scopes = recap_scopes
+
+        if leaderboard_topics is None:
+            self.leaderboard_topics = ['users', 'countries', 'continents']
+        else:
+            self.leaderboard_topics = leaderboard_topics
+
         self.cooldown = cooldown
         self.daily_votes = daily_votes
         self.upload_images = upload_images
@@ -38,13 +45,19 @@ class FameBot:
         self.loaded_users: Dict[int, FameUser] = {}
         self.loaded_recaps: Dict[str, FameRecap] = {}
 
-    def save_data(self) -> None:
-        save_data(self.data)
+    @property
+    def users(self) -> Iterator[FameUser]:
+        for file in os.listdir(users_dir):
+            user_id = int(file.split('.')[0])
+            yield self.get_user(user_id)
 
     @property
     def total_votes(self) -> int:
         recap = self.get_recap('alltime')
         return sum(recap.get(alpha2)[VOTES] for alpha2 in ALPHA2_COUNTRIES)
+
+    def save_data(self) -> None:
+        save_data(self.data)
 
     @property
     def total_points(self) -> int:
@@ -93,12 +106,12 @@ class FameBot:
         else:
             return alpha2, alpha2_to_country(alpha2)  # valid country name converted to alpha2
 
-    def get_user(self, user: User | Member) -> FameUser:
-        if user.id in self.loaded_users:
-            return self.loaded_users[user.id]
+    def get_user(self, user_id: int) -> FameUser:
+        if user_id in self.loaded_users:
+            return self.loaded_users[user_id]
 
-        fame_user = FameUser.from_file(user.id)
-        self.loaded_users[user.id] = fame_user
+        fame_user = FameUser.from_file(user_id)
+        self.loaded_users[user_id] = fame_user
         return fame_user
 
     def get_recap(self, scope: str) -> FameRecap:
@@ -108,6 +121,19 @@ class FameBot:
         recap = FameRecap.from_file(scope)
         self.loaded_recaps[scope] = recap
         return recap
+
+    def get_top_users(self, alpha2: str | None = None) -> Tuple[Dict[str, int], Dict[int, int]]:
+        point_values, vote_values = dict(), dict()
+        for user in self.users:
+            if alpha2:
+                cdata = user.get_country(alpha2)
+                point_values[user.user_id] = cdata[POINTS]
+                vote_values[user.user_id] = cdata[VOTES]
+            else:
+                point_values[user.user_id] = user.total_points
+                vote_values[user.user_id] = user.total_votes
+
+        return sort_dict(point_values), sort_dict(vote_values)
 
     def get_top_countries(self, scope: str) -> Tuple[Dict[str, int], Dict[str, int]]:
         recap = self.get_recap(scope)
@@ -207,7 +233,7 @@ class FameBot:
 
         vote_args = {}
 
-        points_incr = self.do_vote(self.get_user(user), alpha2, 1)
+        points_incr = self.do_vote(self.get_user(user.id), alpha2, 1)
         vote_count, point_count, vote_rank, points_rank = self.get_country_stats(alpha2)
 
         embed = self.get_base_embed(
@@ -244,7 +270,7 @@ class FameBot:
                 if not await self.check_permissions(interaction, False):
                     return
 
-                _fame_user = self.get_user(interaction.user)
+                _fame_user = self.get_user(interaction.user.id)
                 if _fame_user.next_vote and not _fame_user.vote_ready:
                     rem = _fame_user.remaining_cooldown
                     embed = self.get_base_embed(
@@ -263,9 +289,13 @@ class FameBot:
                 # if interaction.user.id not in self.users_role_checked:
                 await self.check_roles(interaction, fame_user)
                 new_resp = await interaction.respond(**_vote_args)
-                await _fame_user.wait_cooldown()
 
+                await _fame_user.wait_cooldown()
                 _vote_args['view'].set_again_state(True)
+                await new_resp.edit(view=_vote_args['view'])
+
+                await asyncio.sleep(30)
+                _vote_args['view'].set_again_state(False)
                 await new_resp.edit(view=_vote_args['view'])
 
             def set_again_state(self, value: bool):
@@ -297,7 +327,6 @@ class FameBot:
         if fame_user.user_id not in self.role_checks:
             return
 
-        print('checking roles!')
         guild, channel = ctx.guild, ctx.channel
         user = ctx.author if type(ctx) == ApplicationContext else ctx.user
 
@@ -310,10 +339,76 @@ class FameBot:
 
         self.role_checks.remove(fame_user.user_id)
 
-    def do_recap(self, user: Member | User | ClientUser, scope: str, continents: bool = False) -> Dict[str, Any]:
-        recap = self.get_recap(scope)
-        is_recap = scope != 'alltime' and not continents
-        point_values, vote_values = None, None
+    async def generate_leaderboard(self, user: Member | User | ClientUser, scope: str, topic: str, page: int = 1,
+                             entries_per_page: int = 20) -> Dict[str, Any]:
+        is_recap = scope != 'alltime'
+        recap = None
+        if topic == 'countries':
+            recap = self.get_recap(scope)
+            point_values, vote_values = self.get_top_countries(scope)
+        elif topic == 'continents':
+            point_values, vote_values = self.get_top_continents(scope)
+        elif topic == 'users':
+            point_values, vote_values = self.get_top_users()
+        else:
+            raise AssertionError
+
+        max_pages = 0
+        embed = self.get_base_embed(user, title=f':earth_africa: Top {scope.lower()} {topic}')
+        for ctype, data in {'points': point_values, 'votes': vote_values}.items():
+            str_list = []
+            for item_indicator, count in data.items():
+                rank = list(data.keys()).index(item_indicator) + 1
+                if topic in ['countries', 'continents']:
+                    alpha2 = item_indicator
+                    dpos = None
+
+                    if topic == 'countries':
+                        cname = format_cname(alpha2, alpha2_to_country(alpha2))
+                        if is_recap:
+                            cdata = recap.get(alpha2)
+                            dpos = cdata[f'dpos_{ctype}']
+                    else:
+                        cname = CONTINENT_CODE_TO_NAME[alpha2]
+
+                    if count == 0:
+                        continue
+
+                    ranking_str = format_country_ranking(cname, rank, count, ctype, dpos)
+
+                else:
+                    user_id = int(item_indicator)
+                    user = self.get_user(user_id)
+                    dc_user = await self.bot.fetch_user(user_id)
+                    if count == 0:
+                        continue
+                    ranking_str = format_country_ranking(dc_user.display_name, rank, count, ctype)
+
+                str_list.append(ranking_str)
+
+            print(len(str_list))
+            max_pages = max(max_pages, ceil(len(str_list) / 20))
+
+            full_str = '\n'.join(str_list[(page-1)*entries_per_page:page*entries_per_page])
+            embed.add_field(name=ctype.capitalize(), value=full_str, inline=True)
+
+        class LeaderoardView(ui.View):
+            @staticmethod
+            async def modify_page(interaction: Interaction, page_n: int):
+                await interaction.edit(**await self.generate_leaderboard(user, scope, topic, page_n, entries_per_page))
+
+            @ui.button(label='Previous Page', style=ButtonStyle.primary, custom_id='prev',
+                       disabled=page == 1)
+            async def prev_btn(self2, button: Button, interaction: Interaction):
+                await self2.modify_page(interaction, page - 1)
+
+            @ui.button(label='Next Page', style=ButtonStyle.primary, custom_id='next',
+                       disabled=page == max_pages)
+            async def next_btn(self2, button: Button, interaction: Interaction):
+                await self2.modify_page(interaction, page + 1)
+
+
+        """point_values, vote_values = None, None
         if continents:
             point_values, vote_values = self.get_top_continents(scope)
         point_strs, vote_strs = dict(), dict()
@@ -337,16 +432,13 @@ class FameBot:
             if point_count != 0 or continents:
                 point_strs[format_country_ranking(c_name, point_rank, point_count, POINTS, point_dpos, is_recap)] = point_count
             if vote_count != 0 or continents:
-                vote_strs[format_country_ranking(c_name, vote_rank, vote_count, VOTES, vote_dpos, is_recap)] = vote_count
+                vote_strs[format_country_ranking(c_name, vote_rank, vote_count, VOTES, vote_dpos, is_recap)] = vote_count"""
 
-        point_strs, vote_strs = sort_dict(point_strs), sort_dict(vote_strs)
-        point_str, vote_str = '\n'.join(list(point_strs.keys())[:20]), '\n'.join(list(vote_strs.keys())[:20])
-
-        embed = self.get_base_embed(user, title=f'🌍 Top {scope.lower()} {"continents" if continents else "countries"}')
-        embed.add_field(name='Points', value=point_str, inline=True)
-        embed.add_field(name='Votes', value=vote_str, inline=True)
-
-        return {'embed': embed}
+        if max_pages > 1 and not is_recap :
+            view = LeaderoardView()
+        else:
+            view = None
+        return {'embed': embed, 'view': view}
 
     @tasks.loop(seconds=5)
     async def recap_task(self):
@@ -364,7 +456,7 @@ class FameBot:
 
         for scope, channel_id in recaps.items():
             recaps_channel = self.bot.get_channel(channel_id)
-            await recaps_channel.send(**self.do_recap(self.bot.user, scope))
+            await recaps_channel.send(**await self.generate_leaderboard(self.bot.user, scope, 'countries'))
             del self.loaded_recaps[scope]
 
         await clear_database(recaps=list(recaps.keys()))
@@ -386,7 +478,7 @@ class FameBot:
         async def vote_cmd(ctx: ApplicationContext, country: Option(str)):
             if not await self.check_permissions(ctx, False):
                 return
-            user = self.get_user(ctx.author)
+            user = self.get_user(ctx.author.id)
             if user.next_vote and not user.vote_ready:
                 rem = user.remaining_cooldown
                 embed = self.get_base_embed(
@@ -410,7 +502,6 @@ class FameBot:
             vote_args['view'].set_again_state(True)
             await ctx.edit(view=vote_args['view'])
 
-            # sleep(60)  # voting window expires after some time...
             await asyncio.sleep(30)
             vote_args['view'].set_again_state(False)
             await ctx.edit(view=vote_args['view'])
@@ -508,6 +599,16 @@ class FameBot:
             )
 
         @top_cmds.command(
+            name='user',
+            description='List of the top users'
+        )
+        async def utop_cmd(ctx: ApplicationContext):
+            if not await self.check_permissions(ctx, False):
+                return
+
+            await ctx.respond(**await self.generate_leaderboard(ctx.user, 'alltime', 'users'))
+
+        @top_cmds.command(
             name='country',
             description='List of the top countries'
         )
@@ -515,7 +616,7 @@ class FameBot:
             if not await self.check_permissions(ctx, False):
                 return
 
-            await ctx.respond(**self.do_recap(ctx.user, 'alltime'))
+            await ctx.respond(**await self.generate_leaderboard(ctx.user, 'alltime', 'countries'))
 
         @top_cmds.command(
             name='continent',
@@ -525,7 +626,7 @@ class FameBot:
             if not await self.check_permissions(ctx, False):
                 return
 
-            await ctx.respond(**self.do_recap(ctx.user, 'alltime', continents=True))
+            await ctx.respond(**await self.generate_leaderboard(ctx.user, 'alltime', 'continents'))
 
         @self.bot.slash_command(
             name='daily',
@@ -535,7 +636,7 @@ class FameBot:
             if not await self.check_permissions(ctx, False):
                 return
 
-            fame_user = self.get_user(ctx.user)
+            fame_user = self.get_user(ctx.user.id)
             if fame_user.daily_claim:
                 next_claim = fame_user.daily_claim + 60*60*20
                 dt = next_claim - time()
@@ -550,7 +651,7 @@ class FameBot:
             except TypeError:
                 return
 
-            fame_user = self.get_user(ctx.author)
+            fame_user = self.get_user(ctx.author.id)
             points_incr = self.do_vote(fame_user, alpha2, self.daily_votes)
             # if ctx.author.id not in self.users_role_checked:
             await self.check_roles(ctx, fame_user)
@@ -593,7 +694,7 @@ class FameBot:
             if not await self.check_permissions(ctx, False):
                 return
 
-            await ctx.respond(**self.do_recap(ctx.user, scope))
+            await ctx.respond(**await self.generate_leaderboard(ctx.user, scope, 'countries'))
 
         @user_cmds.command(
             name='info',
@@ -603,7 +704,7 @@ class FameBot:
             if not await self.check_permissions(ctx, False):
                 return
 
-            fame_user = self.get_user(user)
+            fame_user = self.get_user(user.id)
 
             embed = self.get_base_embed(ctx.author, title=f'{user.name}\'s Profile')
             embed.add_field(name='Leveling', value=fame_user.leveling_formatted, inline=False)
