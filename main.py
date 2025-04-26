@@ -481,7 +481,7 @@ class FameBot:
                     user_id = int(item_indicator)
                     user = self.get_user(user_id)
                     dc_user = await self.fetch_dc_user(user_id)
-                    if count == 0:
+                    if count <= 1:
                         continue
                     ranking_str = format_user_ranking(dc_user.display_name, rank, round(user.leveling, 2), ctype)
 
