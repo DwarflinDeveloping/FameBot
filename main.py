@@ -456,7 +456,6 @@ class FameBot:
 
         max_pages = 0
         embed = self.get_base_embed(user, title=f':earth_africa: Top {scope.lower()} {topic}')
-        print('a')
         for ctype, data in values.items():
             str_list = []
             for item_indicator, count in data.items():
@@ -491,7 +490,6 @@ class FameBot:
             max_pages = max(max_pages, ceil(len(str_list) / 20))
             full_str = '\n'.join(str_list[(page-1)*entries_per_page:page*entries_per_page])
             embed.add_field(name=ctype.capitalize(), value=full_str, inline=True)
-        print('b')
 
         class LeaderboardView(ui.View):
             @staticmethod
