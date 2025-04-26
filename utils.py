@@ -88,14 +88,14 @@ def get_rank_symbol(rank: int) -> str:
     else:
         return ''
 
-def format_user_ranking(c_name: str, rank: int, count: int, ctype: str):
+def format_user_ranking(c_name: str, rank: int, count: float, ctype: str):
     rank_symbol = get_rank_symbol(rank).lstrip()
     rank_str = rank_symbol if rank_symbol else f'\u200b {rank}.'
     count_str = millify(count) if ctype == POINTS else str(count)
     amount_suffix = ' pt.' if ctype == POINTS else ' vt.' if ctype == VOTES else ''
-    return f'{rank_str} {c_name} ({count_str}{amount_suffix})'
+    return f'{rank_str} {c_name} (Lvl. {count_str}{amount_suffix})'
 
-def format_country_ranking(c_name: str, rank: int, count: int, ctype: str, dpos: int | None = None):
+def format_country_ranking(c_name: str, rank: int, count: float, ctype: str, dpos: int | None = None):
     is_recap = dpos is not None
     has_dpos = bool(dpos)
     rank_symbol = get_rank_symbol(rank).lstrip()

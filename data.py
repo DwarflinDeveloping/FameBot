@@ -8,7 +8,7 @@ from os import PathLike
 from pathlib import Path
 import dataclasses
 from time import time
-from typing import Dict, Self, Iterator, List, Any, Type
+from typing import Dict, Self, Iterator, List, Any, Type, Tuple
 
 import discord
 import pycountry
@@ -40,11 +40,15 @@ DATA_PRESET = {
 USER_DATA_PRESET = {
     'total': deepcopy(PV_PRESET),
     'alltime_country': {},
-    'additional_xp': 0,
+    'leveling': {
+        'vote_xp': 0,
+        'additional_xp': 0,
+    },
     'next_vote': None,
     'daily_claim': None,
     'claims': [],
-    'boosters': {}
+    'boosters': {},
+    'active_booster': None
 }
 
 RECAP_DATA_PRESET = {
@@ -85,7 +89,13 @@ class Booster:
     spawn_chance: int
     color: discord.Color
     symbol: str = ''
-    count: int = 1
+
+    def __init__(self, left_duration: int = None):
+        self.left_duration = left_duration if left_duration is not None else self.duration
+
+    def __iter__(self):
+        yield 'name', self.name
+        yield 'left_duration', self.left_duration
 
     @classmethod
     def from_name(cls, name: str) -> Type['Booster'] | None:
@@ -94,51 +104,43 @@ class Booster:
                 return booster
         return None
 
-    """@classmethod
-    def from_data(cls, data: Dict[str, Any]) -> Self:
-        return cls(data['name'], data['boost'], data['duration'], data['count'])
-
-    def __iter__(self) -> Iterator[Tuple[str, Any]]:
-        yield 'name', self.name
-        yield 'boost', self.boost
-        yield 'duration', self.duration
-        yield 'color', self.color
-        yield 'count', self.count"""
+    @classmethod
+    def format_boost(cls):
+        return f'{floor(cls.boost * 100)}%'
 
 class StarterBooster(Booster):
     name = 'Starter Booster'
     symbol = '🔥'
     boost = 4.00
-    duration = 100
+    duration = 50
     spawn_chance = 0
     color = discord.Color.dark_red()
-
-    def __init__(self, count: int = 1):
-        self.count = count
 
 class RoleUpBooster(Booster):
     name = 'Role Up Booster'
     symbol = '⏫'
-    boost = 0.50
+    boost = 1.00
     duration = 20
     spawn_chance = 0
     color = discord.Color.yellow()
-
-    def __init__(self, count: int = 1):
-        self.count = count
 
 class VoteBooster(Booster):
     name = 'Voting Booster'
     symbol = '⬆️'
     boost = 0.50
     duration = 20
-    spawn_chance = 0.50
+    spawn_chance = 0.015
+    color = discord.Color.blue()
+
+class TurboBooster(Booster):
+    name = 'Turbo Booster'
+    symbol = '💎'
+    boost = 1.50
+    duration = 30
+    spawn_chance = 0.005
     color = discord.Color.red()
 
-    def __init__(self, count: int = 1):
-        self.count = count
-
-boosters = (StarterBooster, RoleUpBooster, VoteBooster)
+boosters = (StarterBooster, RoleUpBooster, VoteBooster, TurboBooster)
 
 @dataclasses.dataclass
 class FameRecap:
@@ -199,6 +201,11 @@ class FameUser:
     data: dict
     user_id: int
     start_xp: int = 100
+    xp_leveling_factor = .018
+    cached_user: discord.User | None = None
+
+    def __post_init__(self):
+        self.update_legacy()
 
     @classmethod
     def from_file(cls, user_id: int) -> Self:
@@ -216,8 +223,16 @@ class FameUser:
     def file_path(self) -> Path:
         return Path(users_dir, f'{self.user_id}.json')
 
-    def save(self):
+    def save(self) -> None:
         self.file_path.write_text(json.dumps(self.data, indent=2))
+
+    def update_legacy(self) -> None:
+        if self.total_votes > 0 and self.vote_xp == 0:
+            self.vote_xp = self.total_votes * 10
+
+        if 'additional_xp' in self.data:
+            self.additional_xp = self.data['additional_xp']
+            del self.data['additional_xp']
 
     @property
     def total_votes(self) -> int:
@@ -246,11 +261,19 @@ class FameUser:
 
     @property
     def additional_xp(self) -> int:
-        return self.data['additional_xp']
+        return self.data['leveling']['additional_xp']
 
     @additional_xp.setter
     def additional_xp(self, value: int) -> None:
-        self.data['additional_xp'] = value
+        self.data['leveling']['additional_xp'] = value
+
+    @property
+    def vote_xp(self) -> int:
+        return self.data['leveling']['vote_xp']
+
+    @vote_xp.setter
+    def vote_xp(self, value: int) -> None:
+        self.data['leveling']['vote_xp'] = value
 
     @property
     def daily_claim(self) -> int | None:
@@ -272,17 +295,69 @@ class FameUser:
         self.data['claims'] = value
 
     @property
-    def boosters(self) -> List[Booster]:
-        booster_list = list()
+    def boosters(self) -> Iterator[Tuple[Booster, int]]:
         for name, count in self.data['boosters'].items():
             if count != 0:
-                booster_list.append(Booster.from_name(name)(count=count))
-        return booster_list
+                yield Booster.from_name(name), count
 
-    def add_booster(self, booster: Booster):
+    def add_booster(self, booster: Booster, count: int = 1):
         if booster.name not in self.data['boosters']:
             self.data['boosters'][booster.name] = 0
-        self.data['boosters'][booster.name] += booster.count
+        self.data['boosters'][booster.name] += count
+
+    @property
+    def active_booster(self) -> Booster | None:
+        data = self.data['active_booster']
+        if not data:
+            return None
+
+        booster = Booster.from_name(data['name'])()
+        booster.left_duration = data['left_duration']
+        return booster
+
+    @active_booster.setter
+    def active_booster(self, booster: Booster | None) -> None:
+        self.data['active_booster'] = dict(booster) if booster is not None else None
+
+    def activate_booster(self, booster: Booster):
+        if booster.name not in [b.name for b, _ in self.boosters]:
+            return
+        self.data['boosters'][booster.name] -= 1
+        if self.data['boosters'][booster.name] == 0:
+            del self.data['boosters'][booster.name]
+        self.active_booster = booster
+
+    def do_vote(self, vote_count: int, alpha2: str, booster_applies: bool = True,
+                gives_xp: bool = True) -> Tuple[int, int]:
+        points_gained, xp_gained = 0, 0
+        for _ in range(vote_count):
+            points_incr = self.points_per_vote
+            xp_incr = self.xp_per_vote if gives_xp else 0
+
+            if booster_applies and self.has_active_booster:
+                booster = self.active_booster
+                points_incr *= 1 + booster.boost
+                xp_incr *= 1 + booster.boost
+                points_incr, xp_incr = floor(points_incr), floor(xp_incr)
+                booster.left_duration -= 1
+                if booster.left_duration <= 0:
+                    self.active_booster = None
+                else:
+                    self.data['active_booster'] = dict(booster)
+
+            points_gained += points_incr
+            xp_gained += xp_incr
+            self.total_votes += 1
+            self.total_points += points_gained
+            self.vote_xp += xp_gained
+            self.add_country_alltime(alpha2, points=points_incr, votes=1)
+
+        self.save()
+        return points_gained, xp_gained
+
+    @property
+    def has_active_booster(self):
+        return self.active_booster is not None
 
     @property
     def next_vote(self) -> int | None:
@@ -301,7 +376,7 @@ class FameUser:
         return 'Starter Booster' in self.claims
 
     def check_starter_booster(self) -> None:
-        if self.has_claimed_starter_booster:
+        if self.has_claimed_starter_booster or self.level > 60:
             return
         self.add_booster(StarterBooster())
         self.claims.append('Starter Booster')
@@ -323,24 +398,49 @@ class FameUser:
         self.next_vote = time() + cooldown
 
     @property
-    def xp(self):
-        return self.start_xp + self.total_votes * 10 + self.additional_xp
+    def total_xp(self):
+        return self.start_xp + self.vote_xp + self.additional_xp
 
     @property
-    def xp_per_level(self) -> float:
-        return 100 * pow(1.015, self.xp / 100)
+    def next_level_xp(self) -> float:
+        xp_threshold = self.start_xp
+        for _ in range(self.level):
+            xp_threshold *= 1 + self.xp_leveling_factor
+        return xp_threshold
 
     @property
-    def leveling(self):
-        base = 1.2
-        numerator = self.xp * math.log(base)
-        inner = 1 + (numerator / 1000)
-        level = 10 * (math.log(inner) / math.log(base))
-        return level
+    def leveling(self) -> float:
+        level = 0
+        xp_threshold = self.start_xp  # XP required for level 1
+        xp = self.total_xp
+        while xp >= xp_threshold:
+            level += 1
+            xp -= xp_threshold
+            xp_threshold *= 1 + self.xp_leveling_factor
+        return level + xp / xp_threshold
+
+    @property
+    def xp_until_next_level(self) -> float:
+        current_level_xp = 0
+        xp_threshold = self.start_xp
+        for _ in range(self.level):
+            current_level_xp += xp_threshold
+            xp_threshold *= 1 + self.xp_leveling_factor
+
+        # Calculate the difference between next level's threshold and current XP
+        return self.next_level_xp - (self.total_xp - current_level_xp)
+
+    @property
+    def level(self) -> int:
+        return floor(self.leveling)
 
     @property
     def points_per_vote(self) -> int:
-        return floor(self.leveling)
+        return self.level
+
+    @property
+    def xp_per_vote(self) -> int:
+        return 10
 
     def get_country(self, alpha2: str) -> Dict[str, int]:
         return self.data['country'][alpha2]

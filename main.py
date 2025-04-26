@@ -16,10 +16,10 @@ from discord.ext import tasks
 from dotenv import load_dotenv
 
 from data import FameUser, load_data, save_data, flags_dir, get_flag, get_banner, \
-    get_banner_path, FameRecap, users_dir, clear_database, USER_DATA_PRESET, PV_PRESET, boosters
+    get_banner_path, FameRecap, users_dir, clear_database, USER_DATA_PRESET, PV_PRESET, boosters, Booster, RoleUpBooster
 from utils import sort_dict, alpha2_to_country, country_to_alpha2, ALTERNATIVE_CNAMES, incr_symbol, \
     millify, get_rank_symbol, CONTINENT_CODE_TO_NAME, points_per_capita, country_to_continent, format_country_ranking, \
-    format_cname, POINTS, VOTES, CTYPES, ALPHA2_COUNTRIES
+    format_cname, POINTS, VOTES, CTYPES, ALPHA2_COUNTRIES, format_user_ranking
 
 
 class FameBot:
@@ -44,6 +44,7 @@ class FameBot:
         self.data = load_data()
         self.role_checks: List[int] = []
         self.loaded_users: Dict[int, FameUser] = {}
+        self.cached_users: Dict[int, discord.User] = {}
         self.loaded_recaps: Dict[str, FameRecap] = {}
 
     @property
@@ -115,6 +116,14 @@ class FameBot:
         self.loaded_users[user_id] = fame_user
         return fame_user
 
+    async def fetch_dc_user(self, user_id: int) -> discord.User:
+        if user_id in self.cached_users:
+            return self.cached_users[user_id]
+
+        user = await self.bot.fetch_user(user_id)
+        self.cached_users[user_id] = user
+        return user
+
     def get_recap(self, scope: str) -> FameRecap:
         if scope in self.loaded_recaps:
             return self.loaded_recaps[scope]
@@ -126,7 +135,7 @@ class FameBot:
     def get_top_users(self) -> Dict[int, int]:
         level_values = dict()
         for user in self.users:
-            level_values[user.user_id] = user.points_per_vote
+            level_values[user.user_id] = user.leveling
 
         return sort_dict(level_values)
 
@@ -163,12 +172,22 @@ class FameBot:
         embed = Embed(
             title=title,
             timestamp=datetime.datetime.now(datetime.UTC),
-            color=Colour.red() if error else Colour.blurple(),
+            color=kwargs['color'] if 'color' in kwargs else Colour.red() if error else Colour.light_grey(),
             **kwargs
         )
         embed.set_footer(
             text=user.name,
             icon_url=user.avatar.url if user.avatar else user.default_avatar.url
+        )
+        return embed
+
+    @staticmethod
+    def get_booster_embed(booster: Booster):
+        embed = discord.Embed(
+            title=f':mag_right: You have found a {booster.name} ({booster.format_boost()})!',
+            colour=booster.color,
+            description=f'This booster lasts for {booster.duration} votes.\n'
+                        'View your boosters using **/boosters**'
         )
         return embed
 
@@ -204,57 +223,66 @@ class FameBot:
             return None
         booster = result
         user.add_booster(booster)
-        embed = discord.Embed(
-            title=f':mag_right: You have found a {booster.name} ({booster.boost*100}%)!',
-            colour=booster.color,
-            description=f'This booster lasts for {booster.duration} votes.\n'
-                        'View your boosters using **/boosters**'
-        )
+        embed = self.get_booster_embed(booster)
         return embed
 
-    def do_vote(self, user: FameUser, alpha2: str, votes_count: int) -> int:
+    def do_vote(self, user: FameUser, alpha2: str, votes_count: int, booster_applies: bool = True,
+                gives_xp: bool = True) -> Tuple[int, int]:
         prev_order = (self.get_order(POINTS), self.get_order(VOTES))
-        old_level = user.points_per_vote
+        old_level = user.level
 
-        points_incr = user.points_per_vote * votes_count
-        user.total_votes += votes_count
-        user.total_points += points_incr
-
-        user.add_country_alltime(alpha2, points=points_incr, votes=votes_count)
-        user.save()
+        points_gained, xp_gained = user.do_vote(votes_count, alpha2, booster_applies, gives_xp)
 
         for scope in self.recap_scopes:
             recap = self.get_recap(scope)
-            recap.add(alpha2, points=points_incr, votes=votes_count)
+            recap.add(alpha2, points=points_gained, votes=votes_count)
             recap.save()
 
         new_order = (self.get_order(POINTS), self.get_order(VOTES))
-        new_level = user.points_per_vote
+        new_level = user.level
         self.update_recap_ranks(prev_order, new_order)
         if old_level != new_level:
             self.role_checks.append(user.user_id)
-        return points_incr
+
+        return points_gained, xp_gained
 
     def get_country_stats(self, alpha2: str, scope: str = 'alltime') -> Tuple[int, int, int, int]:
         c_data = self.get_recap(scope).get(alpha2)
         return c_data[VOTES], c_data[POINTS], self.get_rank(alpha2, VOTES, scope), self.get_rank(alpha2, POINTS, scope)
 
-    def vote_args(self, alpha2, c_name: str, fame_user: FameUser, user: User):
+    def vote_args(self, alpha2, c_name: str, fame_user: FameUser, user: User) -> Dict[str, Any]:
         fame_user.update_next_vote(self.cooldown)
         fame_user.save()
 
-        vote_args = {}
+        vote_args = {'embeds': []}
+        active_booster = fame_user.active_booster
+        symbol_str = ''
+        if active_booster is not None:
+            symbol_str = active_booster.symbol + ' '
 
-        points_incr = self.do_vote(self.get_user(user.id), alpha2, 1)
+        old_roles = list(fame_user.roles)
+        points_gained, xp_gained = self.do_vote(self.get_user(user.id), alpha2, 1, )
+        new_roles = list(fame_user.roles)
+        role_up = len(new_roles) > len(old_roles)
+
         vote_count, point_count, vote_rank, points_rank = self.get_country_stats(alpha2)
+        user_rank = list(self.get_top_users().keys()).index(fame_user.user_id) + 1
 
         embed = self.get_base_embed(
-            user, title=f'Vote for {format_cname(alpha2, c_name)} registered! ({incr_symbol(points_incr)}{millify(points_incr)} pt.)'
+            user, title=f'{symbol_str}Vote for {format_cname(alpha2, c_name)} registered! ({incr_symbol(points_gained)}{millify(points_gained)} pt.)'
         )
-        embed.add_field(name='Points',
-                        value=f'{millify(point_count)} (#{points_rank}{get_rank_symbol(points_rank)})', inline=True)
-        embed.add_field(name='Votes',
-                        value=f'{millify(vote_count)} (#{vote_rank}{get_rank_symbol(vote_rank)})', inline=True)
+        if active_booster is not None:
+            embed.colour = active_booster.color
+        left_duration = fame_user.active_booster.left_duration if fame_user.has_active_booster else 0
+        embed.add_field(name='Country stats',
+                        value=f'Points: {millify(point_count)} (#{points_rank}{get_rank_symbol(points_rank)})\n'
+                              f'Votes: {millify(vote_count)} (#{vote_rank}{get_rank_symbol(vote_rank)})',
+                        inline=True)
+        embed.add_field(name='Your stats',
+                        value=f'Level: {fame_user.level} (#{user_rank}{get_rank_symbol(user_rank)})\n'
+                              f'+{xp_gained}XP ({ceil(fame_user.xp_until_next_level)}XP until next level)' +
+                              (f'\nBooster duration: {active_booster.left_duration} -> {left_duration}' if fame_user.has_active_booster else ''),
+                        inline=True)
 
         if self.upload_images:
             if get_banner_path(alpha2).exists():
@@ -290,11 +318,11 @@ class FameBot:
                         description=f'Voting is on cooldown for {ceil(rem)} second{"s" if rem > 1 else ""}.',
                         error=True)
                     await interaction.respond(embed=embed, ephemeral=True)
-                    button.disabled = True
+                    self2.disable_all_items()
                     await interaction.message.edit(view=view)
                     return
 
-                button.disabled = True
+                self2.disable_all_items()
                 await interaction.edit(view=view)
 
                 booster_embed = await self.spawn_boosters(_fame_user)
@@ -309,11 +337,11 @@ class FameBot:
                 _vote_args['view'].set_again_state(True)
                 await new_resp.edit(view=_vote_args['view'])
 
-                await asyncio.sleep(30)
-                _vote_args['view'].set_again_state(False)
+                await asyncio.sleep(60)
+                _vote_args['view'].disable_all_items()
                 await new_resp.edit(view=_vote_args['view'])
 
-            if fame_user.boosters_available:
+            if fame_user.boosters_available and not fame_user.has_active_booster:
                 @ui.button(label='Boosters available', style=ButtonStyle.red, custom_id='boosters')
                 async def boosters_callback(self2, button: Button, interaction: Interaction):
                     await interaction.respond(**self.booster_args(interaction))
@@ -324,34 +352,62 @@ class FameBot:
                         item.disabled = not value
                         break
 
-        view = VoteView()
-        vote_args = vote_args | {
-            'embeds': [embed],
-            'view': view
-        }
+        vote_args['embeds'].append(embed)
+        if role_up:
+            booster = RoleUpBooster()
+            fame_user.add_booster(booster)
+            vote_args['embeds'].append(self.get_booster_embed(booster))
 
+        view = VoteView()
+        vote_args['view'] = view
         return vote_args
 
     def booster_args(self, ctx: ApplicationContext | Interaction):
         fame_user = self.get_user(ctx.user.id)
-        embed = discord.Embed(
-            title='Your Boosters'
-        )
-        for booster in fame_user.boosters:
-            embed.add_field(name=f'{booster.count}x {booster.symbol} {booster.name}',
-                            value=f'Boost factor: {floor(booster.boost*100)}% (10xp -> {floor(10 * (1 + booster.boost))}xp)\n'
+        fame_user.check_starter_booster()
+        has_boosters = len(list(fame_user.boosters)) > 0
+        embed = self.get_base_embed(ctx.user, 'Your Boosters' if has_boosters else 'No boosters in inventory! Keep voting to gain some!')
+
+        for booster, count in fame_user.boosters:
+            embed.add_field(name=f'{count}x {booster.symbol} {booster.name}',
+                            value=f'Boost factor: {booster.format_boost()} (10xp -> {floor(10 * (1 + booster.boost))}xp)\n'
                                   f'Duration: {booster.duration} votes',
                             inline=False)
 
         class BoosterSelect(discord.ui.View):
-            @discord.ui.select(
-                options=[discord.SelectOption(label=b.name, emoji=b.symbol) for b in fame_user.boosters],
-                placeholder='Select a booster to activate',
-                max_values=1,
-                min_values=1,
-            )
-            async def select_callback(self2, select, interaction: Interaction):
-                pass
+            if has_boosters:
+                @discord.ui.select(
+                    options=[discord.SelectOption(label=b.name, emoji=b.symbol) for b, _ in fame_user.boosters],
+                    placeholder='Select a booster to activate' if not fame_user.has_active_booster else f'Active booster: {fame_user.active_booster.name}',
+                    max_values=1,
+                    min_values=1,
+                    disabled=fame_user.has_active_booster
+                )
+                async def select_callback(self2, select: ui.Select, interaction: Interaction):
+                    if interaction.user.id != fame_user.user_id:
+                        await interaction.respond(
+                            embed=self.get_base_embed(interaction.user, f'This is {ctx.user.name}\'s booster menu! Make your own one using /boosters', error=True),
+                            ephemeral=True
+                        )
+                        return
+                    if fame_user.has_active_booster:
+                        await interaction.respond(
+                            embed=self.get_base_embed(
+                                interaction.user, 'Already active!',
+                                description=f'You already have a booster active! The current one runs out in {fame_user.active_booster.left_duration} votes.',
+                                error=True
+                            ), ephemeral=True
+                        )
+                        return
+                    boo = Booster.from_name(select.values[0])
+                    fame_user.activate_booster(boo())
+                    emb = self.get_base_embed(
+                        interaction.user,
+                        title=f'{boo.symbol} You have activated a {boo.name}!',
+                        description=f'Your points and XP gains will increase by {boo.format_boost()} for the next {boo.duration} votes.',
+                        colour=boo.color
+                    )
+                    await interaction.respond(embed=emb)
 
         return {'embed': embed, 'view': BoosterSelect()}
 
@@ -400,6 +456,7 @@ class FameBot:
 
         max_pages = 0
         embed = self.get_base_embed(user, title=f':earth_africa: Top {scope.lower()} {topic}')
+        print('a')
         for ctype, data in values.items():
             str_list = []
             for item_indicator, count in data.items():
@@ -424,16 +481,17 @@ class FameBot:
                 else:
                     user_id = int(item_indicator)
                     user = self.get_user(user_id)
-                    dc_user = await self.bot.fetch_user(user_id)
+                    dc_user = await self.fetch_dc_user(user_id)
                     if count == 0:
                         continue
-                    ranking_str = format_country_ranking(dc_user.display_name, rank, count, ctype)
+                    ranking_str = format_user_ranking(dc_user.display_name, rank, round(user.leveling, 2), ctype)
 
                 str_list.append(ranking_str)
 
             max_pages = max(max_pages, ceil(len(str_list) / 20))
             full_str = '\n'.join(str_list[(page-1)*entries_per_page:page*entries_per_page])
             embed.add_field(name=ctype.capitalize(), value=full_str, inline=True)
+        print('b')
 
         class LeaderboardView(ui.View):
             @staticmethod
@@ -450,11 +508,10 @@ class FameBot:
             async def next_btn(self2, button: Button, interaction: Interaction):
                 await self2.modify_page(interaction, page + 1)
 
+        kwargs = {'embed': embed}
         if max_pages > 1 and not is_recap :
-            view = LeaderboardView()
-        else:
-            view = None
-        return {'embed': embed, 'view': view}
+            kwargs['view'] = LeaderboardView()
+        return kwargs
 
     @tasks.loop(seconds=5)
     async def recap_task(self):
@@ -521,7 +578,7 @@ class FameBot:
             vote_args['view'].set_again_state(True)
             await ctx.edit(view=vote_args['view'])
 
-            await asyncio.sleep(30)
+            await asyncio.sleep(60)
             vote_args['view'].set_again_state(False)
             await ctx.edit(view=vote_args['view'])
 
@@ -625,6 +682,7 @@ class FameBot:
             if not await self.check_permissions(ctx, False):
                 return
 
+            await ctx.defer()
             await ctx.respond(**await self.generate_leaderboard(ctx.user, 'alltime', 'users'))
 
         @top_cmds.command(
@@ -671,7 +729,7 @@ class FameBot:
                 return
 
             fame_user = self.get_user(ctx.author.id)
-            points_incr = self.do_vote(fame_user, alpha2, self.daily_votes)
+            points_gained, xp_gained = self.do_vote(fame_user, alpha2, self.daily_votes, False, False)
             # if ctx.author.id not in self.users_role_checked:
             await self.check_roles(ctx, fame_user)
 
@@ -680,7 +738,7 @@ class FameBot:
             fame_user.save()
 
             embed = self.get_base_embed(
-                ctx.author, title=f'{self.daily_votes} daily votes registered for {format_cname(alpha2, c_name)}! ({incr_symbol(points_incr)}{millify(points_incr)} pt.)'
+                ctx.author, title=f'{self.daily_votes} daily votes registered for {format_cname(alpha2, c_name)}! ({incr_symbol(points_gained)}{millify(points_gained)} pt.)'
             )
             embed.add_field(name='Points',
                             value=f'{millify(point_count)} (#{points_rank}{get_rank_symbol(points_rank)})', inline=True)
@@ -726,7 +784,10 @@ class FameBot:
             fame_user = self.get_user(user.id)
 
             embed = self.get_base_embed(ctx.author, title=f'{user.name}\'s Profile')
-            embed.add_field(name='Leveling', value=fame_user.leveling_formatted, inline=False)
+            embed.add_field(name='Leveling',
+                            value=fame_user.leveling_formatted +
+                                  f'\n{ceil(fame_user.xp_until_next_level)}XP until next level',
+                            inline=False)
             embed.add_field(name='Total votes', value=str(fame_user.total_votes), inline=True)
             embed.add_field(name='Total points', value=str(fame_user.total_points), inline=True)
             embed.set_thumbnail(url=user.avatar.url if user.avatar else user.default_avatar.url)
