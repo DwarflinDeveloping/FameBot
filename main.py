@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 
 from data import FameUser, load_data, save_data, flags_dir, get_flag, get_banner, \
     get_banner_path, FameRecap, users_dir, clear_database, USER_DATA_PRESET, PV_PRESET, boosters, Booster, \
-    RoleUpBooster, alpha2_to_religion, load_trivia, create_mappings
+    RoleUpBooster, load_trivia
 from utils import sort_dict, alpha2_to_country, country_to_alpha2, ALTERNATIVE_CNAMES, incr_symbol, \
     millify, get_rank_symbol, CONTINENT_CODE_TO_NAME, points_per_capita, country_to_continent, format_country_ranking, \
     format_cname, POINTS, VOTES, CTYPES, ALPHA2_COUNTRIES, format_user_ranking
@@ -43,7 +43,7 @@ class FameBot:
 
         self.bot: Bot | None = None
         self.data = load_data()
-        self.trivia_mappings: Dict[str, dict] = create_mappings(load_trivia())
+        self.trivia_df = load_trivia()
         self.role_checks: List[int] = []
         self.loaded_users: Dict[int, FameUser] = {}
         self.cached_users: Dict[int, discord.User] = {}
@@ -161,40 +161,27 @@ class FameBot:
 
         return sort_dict(point_values), sort_dict(vote_values)
 
-    def get_top_religions(self, scope: str) -> Tuple[Dict[str, int], Dict[str, int]]:
+    def get_top_trivia(self, scope: str, category: str) -> Tuple[Dict[str, int], Dict[str, int]]:
+        mappings = self.trivia_df.groupby('ISO2')[category].agg(lambda x: x.value_counts().idxmax()
+                                                                if not x.dropna().empty else None).to_dict()
         recap = self.get_recap(scope)
 
         point_values, vote_values = dict(), dict()
         for alpha2 in ALPHA2_COUNTRIES:
-            religion = alpha2_to_religion(self.trivia_mappings, alpha2)
-            if not religion:
+            key = mappings.get(alpha2, None)
+            if not key:
                 continue
+            if category == 'OfficialLang' and ',' in key:
+                key = key.split(',', maxsplit=1)[0]
 
-            if religion not in point_values:
-                point_values[religion] = 0
-            if religion not in vote_values:
-                vote_values[religion] = 0
-
-            c_data = recap.get(alpha2)
-            point_values[religion] += c_data[POINTS]
-            vote_values[religion] += c_data[VOTES]
-
-        return sort_dict(point_values), sort_dict(vote_values)
-
-    def get_top_continents(self, scope: str) -> Tuple[Dict[str, int], Dict[str, int]]:
-        recap = self.get_recap(scope)
-
-        point_values, vote_values = dict(), dict()
-        for alpha2 in ALPHA2_COUNTRIES:
-            continent = country_to_continent(alpha2)
-            if continent not in point_values:
-                point_values[continent] = 0
-            if continent not in vote_values:
-                vote_values[continent] = 0
+            if key not in point_values:
+                point_values[key] = 0
+            if key not in vote_values:
+                vote_values[key] = 0
 
             c_data = recap.get(alpha2)
-            point_values[continent] += c_data[POINTS]
-            vote_values[continent] += c_data[VOTES]
+            point_values[key] += c_data[POINTS]
+            vote_values[key] += c_data[VOTES]
 
         return sort_dict(point_values), sort_dict(vote_values)
 
@@ -487,17 +474,20 @@ class FameBot:
             recap = self.get_recap(scope)
             point_values, vote_values = self.get_top_countries(scope)
             values = {'points': point_values, 'votes': vote_values}
-        elif topic == 'continents':
-            point_values, vote_values = self.get_top_continents(scope)
-            values = {'points': point_values, 'votes': vote_values}
         elif topic == 'users':
             values = {'levels': self.get_top_users()}
-        elif topic == 'religions':
-            topic_str = 'majority religions'
-            point_values, vote_values = self.get_top_religions(scope)
-            values = {'points': point_values, 'votes': vote_values}
         else:
-            raise AssertionError
+            if topic == 'Continent':
+                topic_str = 'continents'
+            elif topic == 'ReligionPrimary':
+                topic_str = 'majority religions'
+            elif topic == 'RegionName':
+                topic_str = 'regions'
+            elif topic == 'OfficialLang':
+                topic_str = 'languages'
+
+            point_values, vote_values = self.get_top_trivia(scope, topic)
+            values = {'points': point_values, 'votes': vote_values}
 
         max_pages = 0
         embed = self.get_base_embed(user, title=f':earth_africa: Top {scope.lower()} {topic_str}')
@@ -508,7 +498,16 @@ class FameBot:
                     continue
 
                 rank = list(data.keys()).index(item_indicator) + 1
-                if topic in ['countries', 'continents', 'religions']:
+
+                if topic == 'users':
+                    user_id = int(item_indicator)
+                    user = self.get_user(user_id)
+                    dc_user = await self.fetch_dc_user(user_id)
+                    if count <= 1:
+                        continue
+                    ranking_str = format_user_ranking(dc_user.display_name, rank, round(user.leveling, 2), ctype)
+
+                else:
                     dpos = None
 
                     if topic == 'countries':
@@ -517,21 +516,10 @@ class FameBot:
                         if is_recap:
                             cdata = recap.get(alpha2)
                             dpos = cdata[f'dpos_{ctype}']
-                    elif topic == 'continents':
-                        alpha2 = item_indicator
-                        cname = CONTINENT_CODE_TO_NAME[alpha2]
                     else:
                         cname = item_indicator
 
                     ranking_str = format_country_ranking(cname, rank, count, ctype, dpos)
-
-                else:
-                    user_id = int(item_indicator)
-                    user = self.get_user(user_id)
-                    dc_user = await self.fetch_dc_user(user_id)
-                    if count <= 1:
-                        continue
-                    ranking_str = format_user_ranking(dc_user.display_name, rank, round(user.leveling, 2), ctype)
 
                 str_list.append(ranking_str)
 
@@ -752,7 +740,7 @@ class FameBot:
             if not await self.check_permissions(ctx, False):
                 return
 
-            await ctx.respond(**await self.generate_leaderboard(ctx.user, 'alltime', 'continents'))
+            await ctx.respond(**await self.generate_leaderboard(ctx.user, 'alltime', 'Continent'))
 
         @top_cmds.command(
             name='religion',
@@ -762,7 +750,27 @@ class FameBot:
             if not await self.check_permissions(ctx, False):
                 return
 
-            await ctx.respond(**await self.generate_leaderboard(ctx.user, 'alltime', 'religions'))
+            await ctx.respond(**await self.generate_leaderboard(ctx.user, 'alltime', 'ReligionPrimary'))
+
+        @top_cmds.command(
+            name='region',
+            description='List of the top world regions'
+        )
+        async def regtop_cmd(ctx: ApplicationContext):
+            if not await self.check_permissions(ctx, False):
+                return
+
+            await ctx.respond(**await self.generate_leaderboard(ctx.user, 'alltime', 'RegionName'))
+
+        @top_cmds.command(
+            name='language',
+            description='List of the top languages'
+        )
+        async def langtop_cmd(ctx: ApplicationContext):
+            if not await self.check_permissions(ctx, False):
+                return
+
+            await ctx.respond(**await self.generate_leaderboard(ctx.user, 'alltime', 'OfficialLang'))
 
         @self.bot.slash_command(
             name='daily',

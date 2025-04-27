@@ -476,14 +476,6 @@ def load_trivia() -> DataFrame:
         trivia_path.write_text(csv_text)
     return pd.read_csv(trivia_path)
 
-def create_mappings(df: DataFrame) -> Dict[str, dict]:
-    return {
-        'religion': df.groupby('ISO2')['ReligionPrimary'].agg(lambda x: x.value_counts().idxmax()).to_dict()
-    }
-
-def alpha2_to_religion(mappings: Dict[str, dict], alpha2: str) -> str | None:
-    return mappings['religion'].get(alpha2, None)
-
 def save_data(value: dict) -> None:
     data_path.write_text(json.dumps(value, indent=2))
 
