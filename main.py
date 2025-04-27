@@ -15,9 +15,9 @@ from discord import default_permissions, ApplicationContext, Interaction, Button
 from discord.ext import tasks
 from dotenv import load_dotenv
 
-from data import FameUser, load_data, save_data, flags_dir, get_flag, get_banner, \
+from data import FameUser, load_data, save_data_file, flags_dir, get_flag, get_banner, \
     get_banner_path, FameRecap, users_dir, clear_database, USER_DATA_PRESET, PV_PRESET, boosters, Booster, \
-    RoleUpBooster, load_trivia
+    RoleUpBooster, load_trivia, save_data
 from utils import sort_dict, alpha2_to_country, country_to_alpha2, ALTERNATIVE_CNAMES, incr_symbol, \
     millify, get_rank_symbol, CONTINENT_CODE_TO_NAME, points_per_capita, country_to_continent, format_country_ranking, \
     format_cname, POINTS, VOTES, CTYPES, ALPHA2_COUNTRIES, format_user_ranking
@@ -70,7 +70,7 @@ class FameBot:
         return sum(recap.get(alpha2)[VOTES] for alpha2 in ALPHA2_COUNTRIES)
 
     def save_data(self) -> None:
-        save_data(self.data)
+        save_data_file(self.data)
 
     @property
     def total_points(self) -> int:
@@ -554,22 +554,41 @@ class FameBot:
     async def recap_task(self):
         await self.bot.wait_until_ready()
         dt = datetime.datetime.now()
-        if not dt.minute == 0 or not dt.hour == 0:
+        if not dt.minute == 0:
             return
 
-        recaps = {'daily': 1363171417612353658}
+        scopes = ['hourly']
+        channels = {}
+        if not dt.hour == 0:
+            scopes.append('daily')
+            channels['daily'] = 1363171417612353658
         if dt.weekday() == 0:
-            recaps['weekly'] = 1363171435962433768
+            scopes.append('weekly')
+            channels['weekly'] = 1363171435962433768
         if dt.day == 0:
-            recaps['monthly'] = 1363171461954670632
-        # TODO add seasonal clear here
+            scopes.append('seasonal')
+            channels['seasonal'] = 1363171461954670632
 
-        for scope, channel_id in recaps.items():
+        alltime_recap = self.get_recap('alltime')
+        for scope in scopes:
+            name = dt.strftime('%Y-%m-%d')
+            if scope == 'hourly':
+                name = f'{name}_{dt.hour}'
+            save_data(scope, name, alltime_recap.data)
+
+        for scope, channel_id in channels.items():
+            name = dt.strftime('%Y-%m-%d')
+            if scope == 'hourly':
+                name = f'{name}_{dt.hour}'
             recaps_channel = self.bot.get_channel(channel_id)
-            await recaps_channel.send(**await self.generate_leaderboard(self.bot.user, scope, 'countries'))
+            await recaps_channel.send(
+                **await self.generate_leaderboard(self.bot.user, scope, 'countries'),
+                files=[discord.File(Path('exports', scope, name+'.csv'), spoiler=True, filename=name+'.csv'),
+                       discord.File(Path('exports', scope, name+'.json'), spoiler=True, filename=name+'.json')]
+            )
             del self.loaded_recaps[scope]
 
-        await clear_database(recaps=list(recaps.keys()))
+        await clear_database(recaps=list(channels.keys()))
         await asyncio.sleep(100)
 
     def register_cmds(self):

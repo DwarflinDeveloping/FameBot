@@ -1,4 +1,5 @@
 import asyncio
+import csv
 import json
 import math
 import os
@@ -18,6 +19,8 @@ import io
 import requests
 from pandas import DataFrame
 
+from utils import alpha2_to_country
+
 data_path = Path('data.json')
 trivia_path = Path('trivia.csv')
 
@@ -27,9 +30,9 @@ images_dir = Path('images')
 
 users_dir = Path('users')
 recaps_dir = Path('recaps')
+exports_dir = Path('exports')
 
-
-for path in flags_dir, banners_dir, users_dir, images_dir, recaps_dir:
+for path in flags_dir, banners_dir, users_dir, images_dir, recaps_dir, exports_dir:
     path.mkdir(exist_ok=True)
 
 PV_PRESET = {'votes': 0, 'points': 0}
@@ -476,8 +479,22 @@ def load_trivia() -> DataFrame:
         trivia_path.write_text(csv_text)
     return pd.read_csv(trivia_path)
 
-def save_data(value: dict) -> None:
+def save_data_file(value: dict) -> None:
     data_path.write_text(json.dumps(value, indent=2))
+
+def save_data(scope: str, name: str | int, data: dict) -> None:
+    folder = Path(exports_dir, scope)
+    os.makedirs(folder, exist_ok=True)
+
+    json_path, csv_path = Path(folder, f'{name}.json'), Path(folder, f'{name}.csv')
+    json_path.write_text(json.dumps(data, indent=2))
+
+    with open(csv_path, 'w+', newline='') as f:
+        w = csv.DictWriter(f, ['alpha2', 'cname'] + list(list(data['country'].values())[0].keys()))
+        w.writeheader()
+        for alpha2 in data['country']:
+            cname = alpha2_to_country(alpha2)
+            w.writerow({'alpha2': alpha2, 'cname': cname} | data['country'][alpha2])
 
 def clear_folder(dir_path: PathLike):
     for file in os.listdir(dir_path):
