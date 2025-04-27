@@ -48,6 +48,15 @@ class FameBot:
         self.loaded_recaps: Dict[str, FameRecap] = {}
 
     @property
+    def token(self) -> str:
+        return os.getenv('TOKEN')
+
+    @property
+    def is_test_build(self) -> bool:
+        is_test = os.getenv('TESTING')
+        return is_test.lower().capitalize() == str(True) if is_test is not None else False
+
+    @property
     def users(self) -> Iterator[FameUser]:
         for file in os.listdir(users_dir):
             user_id = int(file.split('.')[0])
@@ -300,14 +309,17 @@ class FameBot:
                 embed.set_thumbnail(url=f'https://raw.githubusercontent.com/DwarflinDeveloping/FameBot/refs/heads/master/flags/{alpha2}.png')
 
         class VoteView(ui.View):
+            @staticmethod
+            async def check_user(interaction: Interaction):
+                if interaction.user.id != user.id:
+                    await interaction.respond(embed=self.get_base_embed(user, f'This is {user.name}\'s voting window! Make your own one using /cvote', error=True), ephemeral=True)
+                    return False
+                return True
+
             @ui.button(label='Vote again', style=ButtonStyle.primary, custom_id='again',
                        disabled=False if self.cooldown == 0 else True)
             async def again_callback(self2, button: Button, interaction: Interaction):
-                if interaction.user.id != user.id:
-                    await interaction.respond(embed=self.get_base_embed(user, f'This is {user.name}\'s voting window! Make your own one using /cvote', error=True), ephemeral=True)
-                    return
-
-                if not await self.check_permissions(interaction, False):
+                if not await self2.check_user(interaction) or not await self.check_permissions(interaction, False):
                     return
 
                 _fame_user = self.get_user(interaction.user.id)
@@ -344,6 +356,8 @@ class FameBot:
             if fame_user.boosters_available and not fame_user.has_active_booster:
                 @ui.button(label='Boosters available', style=ButtonStyle.red, custom_id='boosters')
                 async def boosters_callback(self2, button: Button, interaction: Interaction):
+                    if not await self2.check_user(interaction):
+                        return
                     await interaction.respond(**self.booster_args(interaction))
 
             def set_again_state(self, value: bool):
@@ -412,10 +426,15 @@ class FameBot:
         return {'embed': embed, 'view': BoosterSelect()}
 
     async def check_permissions(self, ctx: ApplicationContext | Interaction, admin_only: bool) -> bool:
-        if admin_only and ctx.user.id not in self.admin_ids:
+        is_admin = ctx.user.id in self.admin_ids
+        print(is_admin, self.is_test_build)
+        if admin_only and not is_admin:
             description = ':no_entry_sign: You need to be Admin to use this command!'
         elif self.on_maintenance and ctx.user.id not in self.admin_ids:
             description = ':tools: The bot is currently under maintenance.'
+        elif (not ctx.channel.category_id or ctx.channel.category_id != 1361995334246469703) \
+              and not is_admin and not self.is_test_build:
+            description = 'FAME Vote can only be used in the voting channels of the FAME server.'
         else:
             return True
 
@@ -492,6 +511,9 @@ class FameBot:
             embed.add_field(name=ctype.capitalize(), value=full_str, inline=True)
 
         class LeaderboardView(ui.View):
+            def __init__(self):
+                super().__init__(timeout=None)
+
             @staticmethod
             async def modify_page(interaction: Interaction, page_n: int):
                 await interaction.edit(**await self.generate_leaderboard(user, scope, topic, page_n, entries_per_page))
@@ -882,7 +904,7 @@ class FameBot:
         self.bot = Bot(intents=intents)
         self.register_cmds()
         self.recap_task.start()
-        self.bot.run(os.getenv('TOKEN'))
+        self.bot.run(self.token)
 
         # failsafe to prevent data loss
         bot.save_data()

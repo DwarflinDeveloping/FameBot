@@ -30,9 +30,6 @@ DPV_PRESET = PV_PRESET | {'dpos_votes': 0, 'dpos_points': 0}
 COUNTRY_DATA_PRESET = {country.alpha_2: PV_PRESET.copy() for country in pycountry.countries}
 
 DATA_PRESET = {
-    'total': COUNTRY_DATA_PRESET,
-    'daily_claims': {},
-    'users': {},
     'maintenance': False,
     'admins': [784473264755834880]
 }
