@@ -2,6 +2,7 @@ import asyncio
 import json
 import math
 import os
+import zipfile
 from copy import deepcopy
 from math import floor
 from os import PathLike
@@ -11,9 +12,14 @@ from time import time
 from typing import Dict, Self, Iterator, List, Any, Type, Tuple
 
 import discord
+import pandas as pd
 import pycountry
+import io
+import requests
+from pandas import DataFrame
 
 data_path = Path('data.json')
+trivia_path = Path('trivia.csv')
 
 flags_dir = Path('flags')
 banners_dir = Path('banners')
@@ -21,6 +27,7 @@ images_dir = Path('images')
 
 users_dir = Path('users')
 recaps_dir = Path('recaps')
+
 
 for path in flags_dir, banners_dir, users_dir, images_dir, recaps_dir:
     path.mkdir(exist_ok=True)
@@ -459,6 +466,23 @@ def load_data() -> dict:
         return json.loads(data_path.read_text())
     else:
         return DATA_PRESET
+
+def load_trivia() -> DataFrame:
+    if not trivia_path.is_file():
+        print('Downloading trivia file...')
+        csv_text = requests.get('https://joshuaproject.net/resources/datasets/4').text
+        if 'Joshua Project People Group Data' in csv_text.splitlines()[0]:
+            csv_text = '\n'.join(csv_text.splitlines()[2:])
+        trivia_path.write_text(csv_text)
+    return pd.read_csv(trivia_path)
+
+def create_mappings(df: DataFrame) -> Dict[str, dict]:
+    return {
+        'religion': df.groupby('ISO2')['ReligionPrimary'].agg(lambda x: x.value_counts().idxmax()).to_dict()
+    }
+
+def alpha2_to_religion(mappings: Dict[str, dict], alpha2: str) -> str | None:
+    return mappings['religion'].get(alpha2, None)
 
 def save_data(value: dict) -> None:
     data_path.write_text(json.dumps(value, indent=2))

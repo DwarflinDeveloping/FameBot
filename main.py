@@ -16,7 +16,8 @@ from discord.ext import tasks
 from dotenv import load_dotenv
 
 from data import FameUser, load_data, save_data, flags_dir, get_flag, get_banner, \
-    get_banner_path, FameRecap, users_dir, clear_database, USER_DATA_PRESET, PV_PRESET, boosters, Booster, RoleUpBooster
+    get_banner_path, FameRecap, users_dir, clear_database, USER_DATA_PRESET, PV_PRESET, boosters, Booster, \
+    RoleUpBooster, alpha2_to_religion, load_trivia, create_mappings
 from utils import sort_dict, alpha2_to_country, country_to_alpha2, ALTERNATIVE_CNAMES, incr_symbol, \
     millify, get_rank_symbol, CONTINENT_CODE_TO_NAME, points_per_capita, country_to_continent, format_country_ranking, \
     format_cname, POINTS, VOTES, CTYPES, ALPHA2_COUNTRIES, format_user_ranking
@@ -42,6 +43,7 @@ class FameBot:
 
         self.bot: Bot | None = None
         self.data = load_data()
+        self.trivia_mappings: Dict[str, dict] = create_mappings(load_trivia())
         self.role_checks: List[int] = []
         self.loaded_users: Dict[int, FameUser] = {}
         self.cached_users: Dict[int, discord.User] = {}
@@ -156,6 +158,26 @@ class FameBot:
             c_data = recap.get(alpha2)
             point_values[alpha2] = c_data[POINTS]
             vote_values[alpha2] = c_data[VOTES]
+
+        return sort_dict(point_values), sort_dict(vote_values)
+
+    def get_top_religions(self, scope: str) -> Tuple[Dict[str, int], Dict[str, int]]:
+        recap = self.get_recap(scope)
+
+        point_values, vote_values = dict(), dict()
+        for alpha2 in ALPHA2_COUNTRIES:
+            religion = alpha2_to_religion(self.trivia_mappings, alpha2)
+            if not religion:
+                continue
+
+            if religion not in point_values:
+                point_values[religion] = 0
+            if religion not in vote_values:
+                vote_values[religion] = 0
+
+            c_data = recap.get(alpha2)
+            point_values[religion] += c_data[POINTS]
+            vote_values[religion] += c_data[VOTES]
 
         return sort_dict(point_values), sort_dict(vote_values)
 
@@ -427,7 +449,6 @@ class FameBot:
 
     async def check_permissions(self, ctx: ApplicationContext | Interaction, admin_only: bool) -> bool:
         is_admin = ctx.user.id in self.admin_ids
-        print(is_admin, self.is_test_build)
         if admin_only and not is_admin:
             description = ':no_entry_sign: You need to be Admin to use this command!'
         elif self.on_maintenance and ctx.user.id not in self.admin_ids:
@@ -460,6 +481,7 @@ class FameBot:
     async def generate_leaderboard(self, user: Member | User | ClientUser, scope: str, topic: str, page: int = 1,
                              entries_per_page: int = 20) -> Dict[str, Any]:
         is_recap = scope != 'alltime'
+        topic_str = topic.lower()
         recap = None
         if topic == 'countries':
             recap = self.get_recap(scope)
@@ -470,11 +492,15 @@ class FameBot:
             values = {'points': point_values, 'votes': vote_values}
         elif topic == 'users':
             values = {'levels': self.get_top_users()}
+        elif topic == 'religions':
+            topic_str = 'majority religions'
+            point_values, vote_values = self.get_top_religions(scope)
+            values = {'points': point_values, 'votes': vote_values}
         else:
             raise AssertionError
 
         max_pages = 0
-        embed = self.get_base_embed(user, title=f':earth_africa: Top {scope.lower()} {topic}')
+        embed = self.get_base_embed(user, title=f':earth_africa: Top {scope.lower()} {topic_str}')
         for ctype, data in values.items():
             str_list = []
             for item_indicator, count in data.items():
@@ -482,17 +508,20 @@ class FameBot:
                     continue
 
                 rank = list(data.keys()).index(item_indicator) + 1
-                if topic in ['countries', 'continents']:
-                    alpha2 = item_indicator
+                if topic in ['countries', 'continents', 'religions']:
                     dpos = None
 
                     if topic == 'countries':
+                        alpha2 = item_indicator
                         cname = format_cname(alpha2, alpha2_to_country(alpha2))
                         if is_recap:
                             cdata = recap.get(alpha2)
                             dpos = cdata[f'dpos_{ctype}']
-                    else:
+                    elif topic == 'continents':
+                        alpha2 = item_indicator
                         cname = CONTINENT_CODE_TO_NAME[alpha2]
+                    else:
+                        cname = item_indicator
 
                     ranking_str = format_country_ranking(cname, rank, count, ctype, dpos)
 
@@ -724,6 +753,16 @@ class FameBot:
                 return
 
             await ctx.respond(**await self.generate_leaderboard(ctx.user, 'alltime', 'continents'))
+
+        @top_cmds.command(
+            name='religion',
+            description='List of the top majority religions'
+        )
+        async def reltop_cmd(ctx: ApplicationContext):
+            if not await self.check_permissions(ctx, False):
+                return
+
+            await ctx.respond(**await self.generate_leaderboard(ctx.user, 'alltime', 'religions'))
 
         @self.bot.slash_command(
             name='daily',

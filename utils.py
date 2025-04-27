@@ -4,6 +4,7 @@ import country_converter
 from millify import millify as _millify
 import pypopulation
 from pycountry_convert import country_alpha2_to_continent_code
+import pandas as pd
 
 POINTS = 'points'
 VOTES = 'votes'
@@ -60,6 +61,27 @@ def country_to_continent(alpha2: str) -> str:
         return CONTINENT_CORRECTIONS[alpha2]
     else:
         return country_alpha2_to_continent_code(alpha2)
+
+
+def get_country_religion(alpha2_code, file_path='/mnt/data/AllCountriesListing.csv'):
+    # Read the CSV file
+    df = pd.read_csv(file_path)
+
+    # Normalize column names for easy access
+    df.columns = [col.strip().lower() for col in df.columns]
+
+    # Check if necessary columns exist
+    if 'alpha-2' not in df.columns or 'religion' not in df.columns:
+        raise ValueError("CSV must contain 'alpha-2' and 'religion' columns.")
+
+    # Find the matching row
+    match = df[df['alpha-2'].str.upper() == alpha2_code.upper()]
+
+    if match.empty:
+        return f"No country found with alpha-2 code '{alpha2_code}'."
+
+    # Return the religion (assuming one match)
+    return match.iloc[0]['religion']
 
 CONTINENT_CODE_TO_NAME = {
     'EU': 'Europe',
