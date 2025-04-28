@@ -1,207 +1,17 @@
 import asyncio
-import csv
+import dataclasses
 import json
-import math
-import os
-import zipfile
 from copy import deepcopy
 from math import floor
-from os import PathLike
 from pathlib import Path
-import dataclasses
 from time import time
-from typing import Dict, Self, Iterator, List, Any, Type, Tuple
+from typing import Self, List, Any, Iterator, Tuple, Dict
 
-import discord
-import pandas as pd
-import pycountry
-import io
-import requests
-from pandas import DataFrame
+from discord import User
 
-from utils import alpha2_to_country
+from data import users_dir, USER_DATA_PRESET, PV_PRESET
+from data.boosters import StarterBooster, Booster
 
-data_path = Path('data.json')
-trivia_path = Path('trivia.csv')
-
-flags_dir = Path('flags')
-banners_dir = Path('banners')
-images_dir = Path('images')
-
-users_dir = Path('users')
-recaps_dir = Path('recaps')
-exports_dir = Path('exports')
-
-for path in flags_dir, banners_dir, users_dir, images_dir, recaps_dir, exports_dir:
-    path.mkdir(exist_ok=True)
-
-PV_PRESET = {'votes': 0, 'points': 0}
-DPV_PRESET = PV_PRESET | {'dpos_votes': 0, 'dpos_points': 0}
-COUNTRY_DATA_PRESET = {country.alpha_2: PV_PRESET.copy() for country in pycountry.countries}
-
-DATA_PRESET = {
-    'maintenance': False,
-    'admins': [784473264755834880]
-}
-
-USER_DATA_PRESET = {
-    'total': deepcopy(PV_PRESET),
-    'alltime_country': {},
-    'leveling': {
-        'vote_xp': 0,
-        'additional_xp': 0,
-    },
-    'next_vote': None,
-    'daily_claim': None,
-    'claims': [],
-    'boosters': {},
-    'active_booster': None
-}
-
-RECAP_DATA_PRESET = {
-    'start_timestamp': None,
-    'country': {}
-}
-
-PROGRESSION_ROLES = {
-    0: 1363309917926064210,   # Bronze 1
-    10: 1363920859953103140,  # Bronze 2
-    20: 1363921907497308314,  # Bronze 3
-    30: 1363310545108996238,  # Silver 1
-    40: 1363922324612448469,  # Silver 2
-    50: 1363922416111321478,  # Silver 3
-    60: 1363310802060447804,  # Gold 1
-    70: 1363310895580709017,  # Gold 2
-    80: 1363311104364773596,  # Gold 3
-    90: 1363311311924101180,  # Diamond 1
-    100: 1363311794533437540, # Diamond 2
-    110: 1363312217298305304, # Diamond 3
-    120: 1363312348424568932, # Mythic 1
-    130: 1363312436232323123, # Mythic 2
-    140: 1363312587449569551, # Mythic 3
-    150: 1363312813531070595, # Legendary 1
-    170: 1363312962009301202, # Legendary 2
-    190: 1363313105165095175, # Legendary 3
-    210: 1363313333511389296, # Masters 1
-    230: 1363922924066832504, # Masters 2
-    250: 1363923020774641916, # Masters 3
-    270: 1363323340764479620  # Pro Member
-}
-
-@dataclasses.dataclass
-class Booster:
-    name: str
-    boost: float
-    duration: int
-    spawn_chance: int
-    color: discord.Color
-    symbol: str = ''
-
-    def __init__(self, left_duration: int = None):
-        self.left_duration = left_duration if left_duration is not None else self.duration
-
-    def __iter__(self):
-        yield 'name', self.name
-        yield 'left_duration', self.left_duration
-
-    @classmethod
-    def from_name(cls, name: str) -> Type['Booster'] | None:
-        for booster in boosters:
-            if booster.name == name:
-                return booster
-        return None
-
-    @classmethod
-    def format_boost(cls):
-        return f'{floor(cls.boost * 100)}%'
-
-class StarterBooster(Booster):
-    name = 'Starter Booster'
-    symbol = '🔥'
-    boost = 4.00
-    duration = 50
-    spawn_chance = 0
-    color = discord.Color.dark_red()
-
-class RoleUpBooster(Booster):
-    name = 'Role Up Booster'
-    symbol = '⏫'
-    boost = 1.00
-    duration = 20
-    spawn_chance = 0
-    color = discord.Color.yellow()
-
-class VoteBooster(Booster):
-    name = 'Voting Booster'
-    symbol = '⬆️'
-    boost = 0.50
-    duration = 20
-    spawn_chance = 0.015
-    color = discord.Color.blue()
-
-class TurboBooster(Booster):
-    name = 'Turbo Booster'
-    symbol = '💎'
-    boost = 1.50
-    duration = 30
-    spawn_chance = 0.005
-    color = discord.Color.red()
-
-boosters = (StarterBooster, RoleUpBooster, VoteBooster, TurboBooster)
-
-@dataclasses.dataclass
-class FameRecap:
-    data: dict
-    scope: str
-
-    @classmethod
-    def from_file(cls, scope: str) -> Self:
-        file_path = Path(recaps_dir, f'{scope}.json')
-        if file_path.is_file():
-            recap_data = json.loads(file_path.read_text())
-            for key, preset_val in RECAP_DATA_PRESET.items():
-                if key not in recap_data:
-                    recap_data[key] = deepcopy(preset_val)
-        else:
-            recap_data = deepcopy(RECAP_DATA_PRESET)
-            if scope == 'alltime':
-                recap_data['country'] = deepcopy(COUNTRY_DATA_PRESET)
-            recap_data['start_timestamp'] = time()
-        return cls(recap_data, scope)
-
-    @property
-    def file_path(self) -> Path:
-        return Path(recaps_dir, f'{self.scope}.json')
-
-    def save(self):
-        self.file_path.write_text(json.dumps(self.data, indent=2))
-
-    @property
-    def start_timestamp(self) -> float:
-        return self.data['start_timestamp']
-
-    @start_timestamp.setter
-    def start_timestamp(self, value: float) -> None:
-        self.data['start_timestamp'] = value
-
-    def get(self, alpha2: str):
-        return self.data['country'][alpha2] if alpha2 in self.data['country'] else DPV_PRESET.copy()
-
-    def add(self, alpha2: str, points: int = 0, votes: int = 0, **kwargs):
-        c_data = self.get(alpha2)
-        c_data['votes'] += votes
-        c_data['points'] += points
-        for a, b in kwargs.items():
-            c_data[a] += b
-        self.data['country'][alpha2] = c_data
-
-    def set(self, alpha2: str, points: int = 0, votes: int = 0, **kwargs):
-        c_data = self.get(alpha2)
-        c_data['votes'] = votes
-        c_data['points'] = points
-        for a, b in kwargs.items():
-            c_data[a] = b
-        self.data['country'][alpha2] = c_data
 
 @dataclasses.dataclass
 class FameUser:
@@ -209,7 +19,7 @@ class FameUser:
     user_id: int
     start_xp: int = 100
     xp_leveling_factor = .018
-    cached_user: discord.User | None = None
+    cached_user: User | None = None
 
     def __post_init__(self):
         self.update_legacy()
@@ -452,11 +262,10 @@ class FameUser:
     def get_country(self, alpha2: str) -> Dict[str, int]:
         return self.data['country'][alpha2]
 
-    @property
-    def roles(self) -> Iterator[int]:
-        for requirement in PROGRESSION_ROLES:
+    def get_roles(self, progressions: Dict[int, int]) -> Iterator[int]:
+        for requirement in progressions:
             if self.leveling >= requirement:
-                yield PROGRESSION_ROLES[requirement]
+                yield progressions[requirement]
             else:
                 break
 
@@ -464,65 +273,3 @@ class FameUser:
     def leveling_formatted(self) -> str:
         return f'**Lvl. {floor(self.leveling)}** ({floor((self.leveling % 1 + 1e-5)*100)}% progress)'
 
-def load_data() -> dict:
-    if data_path.exists():
-        return json.loads(data_path.read_text())
-    else:
-        return DATA_PRESET
-
-def load_trivia() -> DataFrame:
-    if not trivia_path.is_file():
-        print('Downloading trivia file...')
-        csv_text = requests.get('https://joshuaproject.net/resources/datasets/4').text
-        if 'Joshua Project People Group Data' in csv_text.splitlines()[0]:
-            csv_text = '\n'.join(csv_text.splitlines()[2:])
-        trivia_path.write_text(csv_text)
-    return pd.read_csv(trivia_path)
-
-def save_data_file(value: dict) -> None:
-    data_path.write_text(json.dumps(value, indent=2))
-
-def save_data(scope: str, name: str | int, data: dict) -> None:
-    folder = Path(exports_dir, scope)
-    os.makedirs(folder, exist_ok=True)
-
-    json_path, csv_path = Path(folder, f'{name}.json'), Path(folder, f'{name}.csv')
-    json_path.write_text(json.dumps(data, indent=2))
-
-    with open(csv_path, 'w+', newline='') as f:
-        w = csv.DictWriter(f, ['alpha2', 'cname'] + list(list(data['country'].values())[0].keys()))
-        w.writeheader()
-        for alpha2 in data['country']:
-            cname = alpha2_to_country(alpha2)
-            w.writerow({'alpha2': alpha2, 'cname': cname} | data['country'][alpha2])
-
-def clear_folder(dir_path: PathLike):
-    for file in os.listdir(dir_path):
-        os.remove(Path(dir_path, file))
-
-async def clear_database(users: bool = False, recaps: List[str] | bool = False):
-    if users is True:
-        clear_folder(users_dir)
-    if type(recaps) == bool and recaps is True:
-        clear_folder(recaps_dir)
-    elif type(recaps) == list:
-        for scope in recaps:
-            Path(recaps_dir, f'{scope}.json').unlink(missing_ok=True)
-
-def get_flag_path(alpha2: str):
-    return Path(flags_dir, alpha2 + '.png')
-
-def get_banner_path(alpha2: str):
-    return Path(banners_dir, alpha2 + '.jpg')
-
-def get_flag(alpha2: str) -> discord.File | None:
-    flag_path = get_flag_path(alpha2)
-    if not flag_path.exists():
-        return None
-    return discord.File(flag_path, filename=alpha2 + '.png')
-
-def get_banner(alpha2: str) -> discord.File | None:
-    banner_path = get_banner_path(alpha2)
-    if not banner_path.exists():
-        return None
-    return discord.File(banner_path, filename=alpha2 + '.jpg')

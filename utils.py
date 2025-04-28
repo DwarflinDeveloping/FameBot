@@ -4,7 +4,6 @@ import country_converter
 from millify import millify as _millify
 import pypopulation
 from pycountry_convert import country_alpha2_to_continent_code
-import pandas as pd
 
 POINTS = 'points'
 VOTES = 'votes'
