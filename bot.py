@@ -448,7 +448,7 @@ class FameBot:
             description = ':no_entry_sign: You need to be Admin to use this command!'
         elif self.on_maintenance and ctx.user.id not in self.admin_ids:
             description = ':tools: The bot is currently under maintenance.'
-        elif (not ctx.channel.category_id or ctx.channel.category_id != 1361995334246469703) \
+        elif (not hasattr(ctx.channel, 'category_id') or not ctx.channel.category_id or ctx.channel.category_id != 1361995334246469703) \
               and not is_admin and not self.is_test_build:
             description = 'FAME Vote can only be used in the voting channels of the FAME server.'
         else:
