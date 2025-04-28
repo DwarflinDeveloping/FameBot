@@ -559,15 +559,15 @@ class FameBot:
 
         scopes = ['hourly']
         channels = {}
-        if not dt.hour == 0:
+        if dt.hour == 0:
             scopes.append('daily')
             channels['daily'] = 1363171417612353658
-        if dt.weekday() == 0:
-            scopes.append('weekly')
-            channels['weekly'] = 1363171435962433768
-        if dt.day == 0:
-            scopes.append('seasonal')
-            channels['seasonal'] = 1363171461954670632
+            if dt.weekday() == 0:
+                scopes.append('weekly')
+                channels['weekly'] = 1363171435962433768
+            if dt.day == 0:
+                scopes.append('seasonal')
+                channels['seasonal'] = 1363171461954670632
 
         alltime_recap = self.get_recap('alltime')
         for scope in scopes:
