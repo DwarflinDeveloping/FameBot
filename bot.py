@@ -4,6 +4,7 @@ import json
 import os
 import random
 from copy import deepcopy
+from functools import cached_property
 from math import ceil, floor
 from pathlib import Path
 from time import time
@@ -14,9 +15,10 @@ from discord import default_permissions, ApplicationContext, Interaction, Button
     Embed, Colour, ButtonStyle, ui, Bot, Intents, SlashCommandGroup, TextChannel, ClientUser
 from discord.ext import tasks
 
-from data import load_app_data, save_app_data, flags_dir, users_dir, clear_database, USER_DATA_PRESET, \
-    PV_PRESET, make_dirs
+from data import load_app_data, save_game_data, flags_dir, users_dir, clear_database, USER_DATA_PRESET, \
+    PV_PRESET, make_dirs, load_game_data, save_app_data
 from data.boosters import RoleUpBooster, Booster, boosters
+from data.giveaways import generate_prices, Giveaway
 from data.recaps import save_data, FameRecap
 from data.resources import get_banner_path, get_banner, get_flag
 from data.trivia import get_mappings, load_trivia
@@ -28,7 +30,7 @@ from utils import sort_dict, alpha2_to_country, country_to_alpha2, ALTERNATIVE_C
 
 class FameBot:
     def __init__(self, cooldown: float = 5, daily_votes: int = 30, recap_scopes: List[str] = None,
-                 leaderboard_topics: List[str] = None, upload_images: bool = False):
+                 leaderboard_topics: List[str] = None, upload_images: bool = False, min_daily_votes: int = 2):
         if recap_scopes is None:
             self.visible_recap_scopes = ['daily', 'weekly', 'seasonal']
             self.recap_scopes = self.visible_recap_scopes + ['alltime']
@@ -43,9 +45,11 @@ class FameBot:
         self.cooldown = cooldown
         self.daily_votes = daily_votes
         self.upload_images = upload_images
+        self.min_daily_votes = min_daily_votes
 
         self.bot: Bot | None = None
-        self.data = load_app_data()
+        self.app_data = load_app_data()
+        self.game_data = load_game_data()
         self.trivia_df = load_trivia()
         self.role_checks: List[int] = []
         self.loaded_users: Dict[int, FameUser] = {}
@@ -74,29 +78,68 @@ class FameBot:
         recap = self.get_recap('alltime')
         return sum(recap.get(alpha2)[VOTES] for alpha2 in ALPHA2_COUNTRIES)
 
-    def save_data(self) -> None:
-        save_app_data(self.data)
-
     @property
     def total_points(self) -> int:
         recap = self.get_recap('alltime')
         return sum(recap.get(alpha2)[POINTS] for alpha2 in ALPHA2_COUNTRIES)
 
+    def save(self) -> None:
+        self.save_game_data()
+        self.save_app_data()
+
+        for obj in list(self.loaded_users.values()) + list(self.loaded_recaps.values()):
+            obj.save()
+
+    def save_game_data(self) -> None:
+        save_game_data(self.game_data)
+
+    def save_app_data(self) -> None:
+        save_app_data(self.app_data)
+
+    @property
+    def daily_giveaway(self) -> Giveaway | None:
+        giveaway = self.game_data['daily_giveaway']
+        print(self.game_data['daily_giveaway'])
+        if giveaway is None:
+            return None
+        return Giveaway.from_dict(giveaway)
+
+    @daily_giveaway.setter
+    def daily_giveaway(self, value: Giveaway) -> None:
+        self.game_data['daily_giveaway'] = dict(value) if value is not None else None
+        self.save_game_data()
+
     @property
     def on_maintenance(self) -> bool:
-        return self.data['maintenance']
+        return self.game_data['maintenance']
 
     @on_maintenance.setter
     def on_maintenance(self, value: bool) -> None:
-        self.data['maintenance'] = value
+        self.game_data['maintenance'] = value
+
+    @property
+    def admin_guilds(self) -> List[int]:
+        return self.app_data['admin_guilds']
+
+    @cached_property
+    def giveaway_channel(self) -> TextChannel:
+        return self.bot.get_channel(self.app_data['giveaway_channel'])
+
+    @cached_property
+    def role_up_channel(self) -> TextChannel:
+        return self.bot.get_channel(self.app_data['role_up_channel'])
 
     @property
     def admin_ids(self) -> List[int]:
-        return self.data['admins']
+        return self.app_data['admins']
 
     @property
     def progression_roles(self) -> Dict[int, int]:
-        return {int(key): val for key, val in self.data['progression_roles'].items()}
+        return {int(key): val for key, val in self.app_data['progression_roles'].items()}
+
+    @property
+    def title_roles(self) -> Dict[int, List[int]]:
+        return self.app_data['title_roles']
 
     def get_order(self, ctype: CTYPES, recap_scope: str = 'alltime') -> List[str]:
         recap = self.get_recap(recap_scope)
@@ -240,15 +283,25 @@ class FameBot:
             if changes:
                 recap.save()
 
-    async def spawn_boosters(self, user: FameUser) -> discord.Embed | None:
+    def spawn_boosters(self, user: FameUser, guaranteed: bool = False) -> discord.Embed | None:
         user.check_starter_booster()
         chances = list(booster.spawn_chance for booster in boosters)
-        chances.append(1 - sum(chances))
-        result = random.choices(list(boosters) + [None], weights=chances, k=1)[0]
+        if guaranteed:
+            total = sum(chances)
+            if total == 0:
+                return None  # avoid division by 0
+            normalized_chances = [c / total for c in chances]
+            result = random.choices(list(boosters), weights=normalized_chances, k=1)[0]
+        else:
+            chances.append(1 - sum(chances))
+            result = random.choices(list(boosters) + [None], weights=chances, k=1)[0]
+
         if result is None:
             return None
+
         booster = result
         user.add_booster(booster)
+        user.last_booster = 0
         embed = self.get_booster_embed(booster)
         return embed
 
@@ -277,7 +330,13 @@ class FameBot:
         return c_data[VOTES], c_data[POINTS], self.get_rank(alpha2, VOTES, scope), self.get_rank(alpha2, POINTS, scope)
 
     def vote_args(self, alpha2, c_name: str, fame_user: FameUser, user: User) -> Dict[str, Any]:
+        booster_embed = self.spawn_boosters(fame_user, guaranteed=True if fame_user.last_booster >= 75 else False)
+
         fame_user.update_next_vote(self.cooldown)
+        fame_user.daily_votes += 1
+        if booster_embed is None:
+            fame_user.last_booster += 1
+
         fame_user.save()
 
         vote_args = {'embeds': []}
@@ -286,10 +345,10 @@ class FameBot:
         if active_booster is not None:
             symbol_str = active_booster.symbol + ' '
 
-        old_roles = list(fame_user.get_roles(self.progression_roles))
-        points_gained, xp_gained = self.do_vote(self.get_user(user.id), alpha2, 1, )
-        new_roles = list(fame_user.get_roles(self.progression_roles))
-        role_up = len(new_roles) > len(old_roles)
+        old_role = fame_user.get_role(self.progression_roles)
+        points_gained, xp_gained = self.do_vote(self.get_user(user.id), alpha2, 1)
+        new_role = fame_user.get_role(self.progression_roles)
+        role_up = new_role != old_role
 
         vote_count, point_count, vote_rank, points_rank = self.get_country_stats(alpha2)
         user_rank = list(self.get_top_users().keys()).index(fame_user.user_id) + 1
@@ -354,11 +413,8 @@ class FameBot:
                 self2.disable_all_items()
                 await interaction.edit(view=view)
 
-                booster_embed = await self.spawn_boosters(_fame_user)
                 _vote_args = self.vote_args(alpha2, c_name, _fame_user, user)
-                if booster_embed:
-                    _vote_args['embeds'].append(booster_embed)
-                # if interaction.user.id not in self.users_role_checked:
+                await self.check_giveaway(_fame_user)
                 await self.check_roles(interaction, fame_user)
                 new_resp = await interaction.respond(**_vote_args)
 
@@ -384,6 +440,8 @@ class FameBot:
                         break
 
         vote_args['embeds'].append(embed)
+        if booster_embed is not None:
+            vote_args['embeds'].append(booster_embed)
         if role_up:
             booster = RoleUpBooster()
             fame_user.add_booster(booster)
@@ -400,7 +458,7 @@ class FameBot:
         embed = self.get_base_embed(ctx.user, 'Your Boosters' if has_boosters else 'No boosters in inventory! Keep voting to gain some!')
 
         for booster, count in fame_user.boosters:
-            embed.add_field(name=f'{count}x {booster.symbol} {booster.name}',
+            embed.add_field(name=booster.format_name(count),
                             value=f'Boost factor: {booster.format_boost()} (10xp -> {floor(10 * (1 + booster.boost))}xp)\n'
                                   f'Duration: {booster.duration} votes',
                             inline=False)
@@ -461,17 +519,65 @@ class FameBot:
         if fame_user.user_id not in self.role_checks:
             return
 
-        guild, channel = ctx.guild, ctx.channel
+        guild, channel = ctx.guild, self.role_up_channel
         user = ctx.author if type(ctx) == ApplicationContext else ctx.user
 
-        if type(user) == Member and guild.id == 378587218849300481:  # only role checking on the FAME server
-            for role_id in fame_user.roles:
-                role = guild.get_role(role_id)
-                if role not in user.roles:
-                    await user.add_roles(role)
-                    await channel.send(f'{ctx.user.mention} has reached {fame_user.total_votes} votes! You are now a {role.name}!')
+        if type(user) != Member or guild.id != 378587218849300481:
+            return  # only role checking on the FAME server
+
+        present_roles = user.roles
+        wanted_role = guild.get_role(fame_user.get_role(self.progression_roles))
+
+        for role_id in self.progression_roles.values():
+            role = guild.get_role(role_id)
+            if role in present_roles and not role == wanted_role:
+                await user.remove_roles(role)
+            elif role not in present_roles and role == wanted_role:
+                await user.add_roles(role)
+                await channel.send(f'{ctx.user.mention} has reached **Lvl. {fame_user.level}**! You are now a {role.name}!')
 
         self.role_checks.remove(fame_user.user_id)
+
+    async def check_giveaway(self, fame_user: FameUser) -> None:
+        if fame_user.daily_votes != self.min_daily_votes:
+            return
+
+        fame_user.daily_streak += 1
+        dc_user = await self.fetch_dc_user(fame_user.user_id)
+        await self.giveaway_channel.send(f'{dc_user.mention} has joined the giveaway! Your daily streak is now {fame_user.daily_streak}.')
+
+    def reset_daily_votes(self):
+        for user in self.users:
+            user.daily_votes = 0
+            user.save()
+
+    async def create_giveaway(self):
+        giveaway = Giveaway.generate()
+        self.daily_giveaway = giveaway
+
+        embed = self.get_base_embed(self.bot.user, ':gift: Daily giveaway',
+                                    description='Today\'s awards:\n' + str(giveaway))
+        embed.add_field(name='How to participate?',
+                        value=f'Anyone who does {self.min_daily_votes} or more votes in the next 24 hours enters the giveaway.')
+        await self.giveaway_channel.send(embed=embed)
+
+    async def resolve_giveaway(self):
+        assert self.daily_giveaway is not None  # daily giveaway should always exist
+        participating = [user for user in self.users if user.daily_votes >= self.min_daily_votes]
+        if not participating:
+            await self.giveaway_channel.send(
+                embed=self.get_base_embed(self.bot.user, 'No participants in the daily giveaway.')
+            )
+            return
+
+        winner = random.choice(participating)
+        self.daily_giveaway.apply(winner)
+
+        winner_dc = await self.fetch_dc_user(winner.user_id)
+        embed = self.get_base_embed(winner_dc, f'{winner_dc.display_name} has won!',
+                                    description=f'You have gained the following rewards:\n{self.daily_giveaway}')
+        await self.giveaway_channel.send(embed=embed)
+        self.daily_giveaway = None
 
     async def generate_leaderboard(self, user: Member | User | ClientUser, scope: str, topic: str, page: int = 1,
                              entries_per_page: int = 20) -> Dict[str, Any]:
@@ -568,6 +674,8 @@ class FameBot:
         scopes = ['hourly']
         channels = {}
         if dt.hour == 0:
+            for user in self.users:
+                user.daily_votes = 0
             scopes.append('daily')
             channels['daily'] = 1363171417612353658
             if dt.weekday() == 0:
@@ -576,6 +684,11 @@ class FameBot:
             if dt.day == 0:
                 scopes.append('seasonal')
                 channels['seasonal'] = 1363171461954670632
+
+            if self.daily_giveaway is not None:
+                await self.resolve_giveaway()
+            await self.create_giveaway()
+            self.reset_daily_votes()
 
         alltime_recap = self.get_recap('alltime')
         for scope in scopes:
@@ -596,7 +709,7 @@ class FameBot:
             )
             del self.loaded_recaps[scope]
 
-        await clear_database(recaps=list(channels.keys()))
+        clear_database(recaps=list(channels.keys()))
         await asyncio.sleep(100)
 
     def register_cmds(self):
@@ -630,11 +743,8 @@ class FameBot:
             except TypeError:
                 return
 
-            booster_embed = await self.spawn_boosters(user)
             vote_args = self.vote_args(alpha2, c_name, user, ctx.author)
-            if booster_embed:
-                vote_args['embeds'].append(booster_embed)
-            # if ctx.author.id not in self.users_role_checked:
+            await self.check_giveaway(user)
             await self.check_roles(ctx, user)
             await ctx.respond(**vote_args)
 
@@ -647,31 +757,53 @@ class FameBot:
             await ctx.edit(view=vote_args['view'])
 
         @self.bot.slash_command(
-            name='reset',
-            description='Resting data manually'
+            name='gen_giveaway',
+            guild_ids=self.admin_guilds
         )
         @default_permissions(administrator=True)
-        async def reset_cmd(ctx: ApplicationContext, scope: Option(str, choices=['everything', 'users'] + self.recap_scopes)):
+        async def gen_giveaway_cmd(ctx: ApplicationContext):
+            await self.create_giveaway()
+
+        @self.bot.slash_command(
+            name='resolve_giveaway',
+            guild_ids=self.admin_guilds
+        )
+        @default_permissions(administrator=True)
+        async def resolve_giveaway_cmd(ctx: ApplicationContext):
+            await self.resolve_giveaway()
+
+        @self.bot.slash_command(
+            name='reset',
+            description='Resting data manually',
+            guild_ids=self.admin_guilds
+        )
+        @default_permissions(administrator=True)
+        async def reset_cmd(ctx: ApplicationContext, scope: Option(str, choices=['everything', 'users', 'game_data'] + self.recap_scopes)):
             if not await self.check_permissions(ctx, True):
                 return
 
-            # self.data = deepcopy(DATA_PRESET)
             self.loaded_recaps, self.loaded_users = {}, {}
 
             kwargs = {}
             if scope == 'everything':
-                kwargs['users'], kwargs['recaps'] = True, True
+                kwargs['users'], kwargs['recaps'], kwargs['game_data'] = True, True, True
+            elif scope == 'game_data':
+                kwargs['game_data'] = True
             elif scope == 'users':
                 kwargs['users'] = True
             else:
                 kwargs['recaps'] = [scope]
-            await clear_database(**kwargs)
+                if scope == 'daily':
+                    for user in self.users:
+                        user.daily_votes = 0
+            clear_database(**kwargs)
 
             await ctx.respond(embed=self.get_base_embed(ctx.author, f'{scope.capitalize()} cleared', description='Hope you know what you are doing!'), ephemeral=True)
 
         @country_cmds.command(
             name='set',
-            description='Sets votes of a country to a specific amount'
+            description='Sets votes of a country to a specific amount',
+            guild_ids=self.admin_guilds
         )
         @default_permissions(administrator=True)
         async def cset_cmd(ctx: ApplicationContext,
@@ -696,7 +828,8 @@ class FameBot:
 
         @country_cmds.command(
             name='clear',
-            description='Resets votes for a specific country'
+            description='Resets votes for a specific country',
+            guild_ids=self.admin_guilds
         )
         @default_permissions(administrator=True)
         async def cclear_cmd(ctx: ApplicationContext, country: Option(str)):
@@ -884,6 +1017,10 @@ class FameBot:
                             inline=False)
             embed.add_field(name='Total votes', value=str(fame_user.total_votes), inline=True)
             embed.add_field(name='Total points', value=str(fame_user.total_points), inline=True)
+            embed.add_field(name='Daily streak',
+                            value=f'Current streak: {fame_user.daily_streak}\n'
+                                  f'Reached today? {"**yes**" if fame_user.daily_votes >= self.min_daily_votes else f"**no**, do {self.min_daily_votes - fame_user.daily_votes} more votes"}',
+                            inline=False)
             embed.set_thumbnail(url=user.avatar.url if user.avatar else user.default_avatar.url)
             await ctx.respond(embed=embed)
 
@@ -981,6 +1118,4 @@ class FameBot:
         self.bot.run(self.token)
 
         # failsafe to prevent data loss
-        self.save_data()
-        for obj in list(self.loaded_users.values()) + list(self.loaded_recaps.values()):
-            obj.save()
+        self.save()

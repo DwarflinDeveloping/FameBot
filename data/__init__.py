@@ -9,9 +9,16 @@ PV_PRESET = {'votes': 0, 'points': 0}
 DPV_PRESET = PV_PRESET | {'dpos_votes': 0, 'dpos_points': 0}
 COUNTRY_DATA_PRESET = {country.alpha_2: PV_PRESET.copy() for country in pycountry.countries}
 
-APP_DATA_PRESET = {
+GAME_DATA_PRESET = {
     'maintenance': False,
+    'daily_giveaway': None
+}
+
+APP_DATA_PRESET = {
     'admins': [784473264755834880],
+    'admin_guilds': [786942711948771368],
+    'giveaway_channel': 898195421925634087,
+    'role_up_channel': 1367441392531542078,
     'progression_roles': {
         0: 1363309917926064210,   # Bronze 1
         10: 1363920859953103140,  # Bronze 2
@@ -36,6 +43,13 @@ APP_DATA_PRESET = {
         250: 1363923020774641916, # Masters 3
         270: 1363323340764479620  # Pro Member
     },
+    'title_roles': {
+        .010: [1365957750131261441, 1365953650404360223, 1365849349829169172],  # Normal 1%
+        .007: [1365953827060191242, 1365849869578932304, 1365849763093942332],  # Rare 0.7%
+        .006: [1365953713902190613, 1365849426853367910, 1365849269361316012],  # Super rare 0.6%
+        .005: [1365953216315002880, 1365953915136249886, 1365952821777928232],  # Mythic 0.5%
+        .002: [1365850043625504849, 1365849826285060207, 1365849684177981621]   # Legendary 0.2%
+    },
     'recap_channels': {
         'daily': 1363171417612353658,
         'weekly': 1363171435962433768,
@@ -48,13 +62,18 @@ USER_DATA_PRESET = {
     'alltime_country': {},
     'leveling': {
         'vote_xp': 0,
-        'additional_xp': 0,
+        'giveaway_xp': 0,
+        'gift_xp': 0,
+        'additional_xp': 0
     },
     'next_vote': None,
     'daily_claim': None,
+    'daily_votes': 0,
+    'daily_streak': 0,
     'claims': [],
     'boosters': {},
-    'active_booster': None
+    'active_booster': None,
+    'last_booster': 0
 }
 
 RECAP_DATA_PRESET = {
@@ -62,7 +81,8 @@ RECAP_DATA_PRESET = {
     'country': {}
 }
 
-data_path = Path('data.json')
+app_data_path = Path('app_data.json')
+game_data_path = Path('game_data.json')
 trivia_path = Path('trivia.csv')
 
 flags_dir = Path('flags')
@@ -80,21 +100,32 @@ def make_dirs() -> None:
         dir_path.mkdir(exist_ok=True)
 
 def load_app_data() -> dict:
-    if data_path.exists():
-        return json.loads(data_path.read_text())
+    if app_data_path.exists():
+        return json.loads(app_data_path.read_text())
     else:
         return deepcopy(APP_DATA_PRESET)
 
+def load_game_data() -> dict:
+    if game_data_path.exists():
+        return json.loads(game_data_path.read_text())
+    else:
+        return deepcopy(GAME_DATA_PRESET)
+
+def save_game_data(value: dict) -> None:
+    game_data_path.write_text(json.dumps(value, indent=2))
+
 def save_app_data(value: dict) -> None:
-    data_path.write_text(json.dumps(value, indent=2))
+    app_data_path.write_text(json.dumps(value, indent=2))
 
 def clear_folder(dir_path: os.PathLike):
     for file in os.listdir(dir_path):
         os.remove(Path(dir_path, file))
 
-def clear_database(users: bool = False, recaps: List[str] | bool = False):
+def clear_database(users: bool = False, recaps: List[str] | bool = False, game_data: bool = False):
     if users is True:
         clear_folder(users_dir)
+    if game_data is True:
+        game_data_path.unlink(missing_ok=True)
     if type(recaps) == bool and recaps is True:
         clear_folder(recaps_dir)
     elif type(recaps) == list:

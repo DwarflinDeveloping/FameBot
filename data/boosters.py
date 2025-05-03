@@ -1,6 +1,6 @@
 import dataclasses
 from math import floor
-from typing import Type
+from typing import Type, Self
 
 from discord import Color
 
@@ -17,8 +17,12 @@ class Booster:
     def __init__(self, left_duration: int = None):
         self.left_duration = left_duration if left_duration is not None else self.duration
 
+    @classmethod
+    def cls_dict(cls):
+        yield 'name', cls.name
+
     def __iter__(self):
-        yield 'name', self.name
+        yield from self.cls_dict()
         yield 'left_duration', self.left_duration
 
     @classmethod
@@ -29,8 +33,18 @@ class Booster:
         return None
 
     @classmethod
+    def from_dict(cls, data: dict) -> Self:
+        left_duration = data.get('left_duration', None)
+        return cls.from_name(data['name'])(left_duration)
+
+    @classmethod
     def format_boost(cls):
         return f'{floor(cls.boost * 100)}%'
+
+    @classmethod
+    def format_name(cls, amount: int = None) -> str:
+        amount_prefix = f'{amount}x ' if amount else ''
+        return f'{amount_prefix}{cls.symbol} {cls.name}'
 
 class StarterBooster(Booster):
     name = 'Starter Booster'
@@ -64,4 +78,12 @@ class TurboBooster(Booster):
     spawn_chance = 0.005
     color = Color.red()
 
-boosters = (StarterBooster, RoleUpBooster, VoteBooster, TurboBooster)
+class DailyBooster(Booster):
+    name = 'Daily Booster'
+    symbol = '🎁'
+    boost = 1.50
+    duration = 30
+    spawn_chance = 0.005
+    color = Color.red()
+
+boosters = (StarterBooster, RoleUpBooster, VoteBooster, TurboBooster, DailyBooster)

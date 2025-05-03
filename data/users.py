@@ -5,7 +5,7 @@ from copy import deepcopy
 from math import floor
 from pathlib import Path
 from time import time
-from typing import Self, List, Any, Iterator, Tuple, Dict
+from typing import Self, List, Any, Iterator, Tuple, Dict, Type
 
 from discord import User
 
@@ -32,6 +32,10 @@ class FameUser:
             for key, preset_val in USER_DATA_PRESET.items():
                 if key not in user_data:
                     user_data[key] = deepcopy(preset_val)
+                elif key in ['leveling']:
+                    for subkey, subval in preset_val.items():
+                        if subkey not in user_data[key]:
+                            user_data[key][subkey] = subval
         else:
             user_data = deepcopy(USER_DATA_PRESET)
         return cls(user_data, user_id)
@@ -67,6 +71,22 @@ class FameUser:
     def total_points(self, value: int) -> None:
         self.data['total']['points'] = value
 
+    @property
+    def daily_votes(self) -> int:
+        return self.data['daily_votes']
+
+    @daily_votes.setter
+    def daily_votes(self, value: int) -> None:
+        self.data['daily_votes'] = value
+
+    @property
+    def daily_streak(self) -> int:
+        return self.data['daily_streak']
+
+    @daily_streak.setter
+    def daily_streak(self, value: int) -> None:
+        self.data['daily_streak'] = value
+
     def get_country_alltime(self, alpha2: str):
         return self.data['alltime_country'][alpha2] if alpha2 in self.data['alltime_country'] else PV_PRESET.copy()
 
@@ -83,6 +103,22 @@ class FameUser:
     @additional_xp.setter
     def additional_xp(self, value: int) -> None:
         self.data['leveling']['additional_xp'] = value
+
+    @property
+    def giveaway_xp(self) -> int:
+        return self.data['leveling']['giveaway_xp']
+
+    @giveaway_xp.setter
+    def giveaway_xp(self, value: int) -> None:
+        self.data['leveling']['giveaway_xp'] = value
+
+    @property
+    def gift_xp(self) -> int:
+        return self.data['leveling']['gift_xp']
+
+    @gift_xp.setter
+    def gift_xp(self, value: int) -> None:
+        self.data['leveling']['gift_xp'] = value
 
     @property
     def vote_xp(self) -> int:
@@ -117,7 +153,7 @@ class FameUser:
             if count != 0:
                 yield Booster.from_name(name), count
 
-    def add_booster(self, booster: Booster, count: int = 1):
+    def add_booster(self, booster: Type[Booster], count: int = 1):
         if booster.name not in self.data['boosters']:
             self.data['boosters'][booster.name] = 0
         self.data['boosters'][booster.name] += count
@@ -143,6 +179,14 @@ class FameUser:
         if self.data['boosters'][booster.name] == 0:
             del self.data['boosters'][booster.name]
         self.active_booster = booster
+
+    @property
+    def last_booster(self) -> int:
+        return self.data['last_booster']
+
+    @last_booster.setter
+    def last_booster(self, value: int) -> None:
+        self.data['last_booster'] = value
 
     def do_vote(self, vote_count: int, alpha2: str, booster_applies: bool = True,
                 gives_xp: bool = True) -> Tuple[int, int]:
@@ -195,7 +239,7 @@ class FameUser:
     def check_starter_booster(self) -> None:
         if self.has_claimed_starter_booster or self.level > 60:
             return
-        self.add_booster(StarterBooster())
+        self.add_booster(StarterBooster)
         self.claims.append('Starter Booster')
         self.save()
 
@@ -216,7 +260,7 @@ class FameUser:
 
     @property
     def total_xp(self):
-        return self.start_xp + self.vote_xp + self.additional_xp
+        return self.start_xp + self.vote_xp + self.giveaway_xp + self.gift_xp + self.additional_xp
 
     @property
     def next_level_xp(self) -> float:
@@ -262,12 +306,14 @@ class FameUser:
     def get_country(self, alpha2: str) -> Dict[str, int]:
         return self.data['country'][alpha2]
 
-    def get_roles(self, progressions: Dict[int, int]) -> Iterator[int]:
-        for requirement in progressions:
-            if self.leveling >= requirement:
-                yield progressions[requirement]
+    def get_role(self, progressions: Dict[int, int]) -> int | None:
+        top_role = None
+        for requirement, role in progressions.items():
+            if requirement > self.leveling:
+                return top_role
             else:
-                break
+                top_role = role
+        return None
 
     @property
     def leveling_formatted(self) -> str:
