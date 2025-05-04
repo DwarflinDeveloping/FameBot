@@ -32,7 +32,7 @@ from utils import sort_dict, alpha2_to_country, country_to_alpha2, ALTERNATIVE_C
 
 class FameBot:
     def __init__(self, cooldown: float = 5, daily_votes: int = 30, recap_scopes: List[str] = None,
-                 leaderboard_topics: List[str] = None, upload_images: bool = False, min_daily_votes: int = 2):
+                 leaderboard_topics: List[str] = None, upload_images: bool = False, min_daily_votes: int = 30):
         if recap_scopes is None:
             self.visible_recap_scopes = ['daily', 'weekly', 'seasonal']
             self.recap_scopes = self.visible_recap_scopes + ['alltime']
