@@ -1,10 +1,10 @@
 import dataclasses
-from math import floor
-from typing import Type, Self, Literal
+from typing import Literal
 
 from discord import Color
 
 RARITIES = Literal['COMMON', 'RARE', 'SUPER_RARE', 'MYTHIC', 'LEGENDARY']
+
 RARITY_COLORS = {
     'COMMON': Color.greyple(),
     'RARE': Color.blue(),
@@ -22,15 +22,15 @@ RARITY_XP = {
 }
 
 RARITY_CHANCES = {
-    'COMMON': .060,
+    'COMMON': .010,
     'RARE': .207,
     'SUPER_RARE': .206,
     'MYTHIC': .205,
-    'LEGENDARY': .202
+    'LEGENDARY': .002
 }
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class Title:
     name: str
     rarity: RARITIES

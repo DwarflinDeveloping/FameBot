@@ -12,18 +12,19 @@ from typing import Tuple, List, Dict, Any, Iterator
 
 import discord
 from discord import default_permissions, ApplicationContext, Interaction, Button, User, Member, Option, File, \
-    Embed, Colour, ButtonStyle, ui, Bot, Intents, SlashCommandGroup, TextChannel, ClientUser
+    Embed, ButtonStyle, ui, Bot, Intents, SlashCommandGroup, TextChannel, ClientUser
 from discord.ext import tasks
 
 from data import load_app_data, save_game_data, flags_dir, users_dir, clear_database, USER_DATA_PRESET, \
-    PV_PRESET, make_dirs, load_game_data, save_app_data, titles
+    PV_PRESET, make_dirs, load_game_data, save_app_data
 from data.boosters import RoleUpBooster, Booster, boosters
-from data.giveaways import Giveaway
+from data.giveaways import Giveaway, StreakReward
 from data.recaps import save_data, FameRecap
 from data.resources import get_banner_path, get_banner, get_flag
 from data.titles import RARITY_CHANCES, Title, RARITY_XP
 from data.trivia import get_mappings, load_trivia
 from data.users import FameUser
+from formatting import get_base_embed, get_title_embed, get_booster_embed, get_streak_embed
 from utils import sort_dict, alpha2_to_country, country_to_alpha2, ALTERNATIVE_CNAMES, incr_symbol, \
     millify, get_rank_symbol, CONTINENT_CODE_TO_NAME, points_per_capita, country_to_continent, format_country_ranking, \
     format_cname, POINTS, VOTES, CTYPES, ALPHA2_COUNTRIES, format_user_ranking
@@ -31,7 +32,7 @@ from utils import sort_dict, alpha2_to_country, country_to_alpha2, ALTERNATIVE_C
 
 class FameBot:
     def __init__(self, cooldown: float = 5, daily_votes: int = 30, recap_scopes: List[str] = None,
-                 leaderboard_topics: List[str] = None, upload_images: bool = False, min_daily_votes: int = 30):
+                 leaderboard_topics: List[str] = None, upload_images: bool = False, min_daily_votes: int = 2):
         if recap_scopes is None:
             self.visible_recap_scopes = ['daily', 'weekly', 'seasonal']
             self.recap_scopes = self.visible_recap_scopes + ['alltime']
@@ -146,6 +147,12 @@ class FameBot:
     def title_role_ids(self) -> Dict[str, List[int]]:
         return self.app_data['title_roles']
 
+    @property
+    def titles(self) -> Iterator[Title]:
+        for rarity, titles in self.title_roles.items():
+            for title_role in titles:
+                yield Title(title_role.name, rarity)
+
     def get_order(self, ctype: CTYPES, recap_scope: str = 'alltime') -> List[str]:
         recap = self.get_recap(recap_scope)
         return list(sort_dict({alpha2: recap.get(alpha2)[ctype] for alpha2 in ALPHA2_COUNTRIES}).keys())
@@ -168,7 +175,7 @@ class FameBot:
         try:
             alpha2 = country_to_alpha2(c_inp)
         except ValueError:
-            embed = self.get_base_embed(ctx.author,f'Unknown country {inp}!', description=' Please use a 2-letter code or the full name.', error=True)
+            embed = get_base_embed(ctx.author,f'Unknown country {inp}!', description=' Please use a 2-letter code or the full name.', error=True)
             embed.add_field(name='Example:', value='*Germany* or *DE*')
             await ctx.respond(embed=embed, ephemeral=True)
             return None
@@ -241,43 +248,6 @@ class FameBot:
 
         return sort_dict(point_values), sort_dict(vote_values)
 
-    @staticmethod
-    def get_base_embed(user: User, title: str, error: bool = False, **kwargs) -> Embed:
-        embed = Embed(
-            title=title,
-            timestamp=datetime.datetime.now(datetime.UTC),
-            color=kwargs['color'] if 'color' in kwargs else Colour.red() if error else Colour.light_grey(),
-            **kwargs
-        )
-        embed.set_footer(
-            text=user.name,
-            icon_url=user.avatar.url if user.avatar else user.default_avatar.url
-        )
-        return embed
-
-    @staticmethod
-    def get_booster_embed(booster: Booster):
-        embed = discord.Embed(
-            title=f':mag_right: You have found a {booster.name} ({booster.format_boost()})!',
-            colour=booster.color,
-            description=f'This booster lasts for {booster.duration} votes.\n'
-                        'View your boosters using **/boosters**'
-        )
-        return embed
-
-    @staticmethod
-    def get_title_embed(title: Title, compensation: bool = False):
-        if compensation:
-            descr1 = f'Since you already have this title, you instead get {title.compensation} xp.'
-        else:
-            descr1 = f'This title will make you gain {title.xp_incr} more xp per vote permanently.\n'
-        embed = discord.Embed(
-            title=f':speech_balloon: You have found a {title.formatted_rarity} title: {title.name}!',
-            colour=title.color,
-            description=descr1 + '\nView your title collection using **/titles**'
-        )
-        return embed
-
     def calc_incr_legacy(self, votes_count: int) -> int:
         # old way of calculating point increments
         return sum([self.total_votes+i-1 for i in range(votes_count)])
@@ -305,6 +275,10 @@ class FameBot:
         roles = []
         weights = []
 
+        if self.title_roles is None:
+            print('Bot not ready!')
+            raise AssertionError
+
         for rarity, role_list in self.title_roles.items():
             chance = RARITY_CHANCES.get(rarity)
             per_role_weight = chance / len(role_list)
@@ -328,7 +302,7 @@ class FameBot:
             user.title_dupl_xp += title.compensation
             compensation = True
 
-        return self.get_title_embed(title, compensation)
+        return get_title_embed(title, compensation)
 
     def spawn_boosters(self, user: FameUser, guaranteed: bool = False) -> discord.Embed | None:
         user.check_starter_booster()
@@ -349,7 +323,7 @@ class FameBot:
         booster = result
         user.add_booster(booster)
         user.last_booster = 0
-        embed = self.get_booster_embed(booster)
+        embed = get_booster_embed(booster)
         return embed
 
     def do_vote(self, user: FameUser, alpha2: str, votes_count: int, booster_applies: bool = True,
@@ -401,7 +375,7 @@ class FameBot:
         vote_count, point_count, vote_rank, points_rank = self.get_country_stats(alpha2)
         user_rank = list(self.get_top_users().keys()).index(fame_user.user_id) + 1
 
-        embed = self.get_base_embed(
+        embed = get_base_embed(
             user, title=f'{symbol_str}Vote for {format_cname(alpha2, c_name)} registered! ({incr_symbol(points_gained)}{millify(points_gained)} pt.)'
         )
         if active_booster is not None:
@@ -436,7 +410,7 @@ class FameBot:
             @staticmethod
             async def check_user(interaction: Interaction):
                 if interaction.user.id != user.id:
-                    await interaction.respond(embed=self.get_base_embed(user, f'This is {user.name}\'s voting window! Make your own one using /cvote', error=True), ephemeral=True)
+                    await interaction.respond(embed=get_base_embed(user, f'This is {user.name}\'s voting window! Make your own one using /cvote', error=True), ephemeral=True)
                     return False
                 return True
 
@@ -449,7 +423,7 @@ class FameBot:
                 _fame_user = self.get_user(interaction.user.id)
                 if _fame_user.next_vote and not _fame_user.vote_ready:
                     rem = _fame_user.remaining_cooldown
-                    embed = self.get_base_embed(
+                    embed = get_base_embed(
                         interaction.user, 'Slow down!',
                         description=f'Voting is on cooldown for {ceil(rem)} second{"s" if rem > 1 else ""}.',
                         error=True)
@@ -462,7 +436,7 @@ class FameBot:
                 await interaction.edit(view=view)
 
                 _vote_args = self.vote_args(alpha2, c_name, _fame_user, user)
-                await self.check_giveaway(_fame_user)
+                await self.check_streak(interaction, _fame_user)
                 await self.check_roles(interaction, fame_user)
                 new_resp = await interaction.respond(**_vote_args)
 
@@ -504,7 +478,7 @@ class FameBot:
         fame_user = self.get_user(ctx.user.id)
         fame_user.check_starter_booster()
         has_boosters = len(list(fame_user.boosters)) > 0
-        embed = self.get_base_embed(ctx.user, 'Your Boosters' if has_boosters else 'No boosters in inventory! Keep voting to gain some!')
+        embed = get_base_embed(ctx.user, 'Your Boosters' if has_boosters else 'No boosters in inventory! Keep voting to gain some!')
 
         for booster, count in fame_user.boosters:
             embed.add_field(name=booster.format_name(count),
@@ -524,13 +498,13 @@ class FameBot:
                 async def select_callback(self2, select: ui.Select, interaction: Interaction):
                     if interaction.user.id != fame_user.user_id:
                         await interaction.respond(
-                            embed=self.get_base_embed(interaction.user, f'This is {ctx.user.name}\'s booster menu! Make your own one using /boosters', error=True),
+                            embed=get_base_embed(interaction.user, f'This is {ctx.user.name}\'s booster menu! Make your own one using /boosters', error=True),
                             ephemeral=True
                         )
                         return
                     if fame_user.has_active_booster:
                         await interaction.respond(
-                            embed=self.get_base_embed(
+                            embed=get_base_embed(
                                 interaction.user, 'Already active!',
                                 description=f'You already have a booster active! The current one runs out in {fame_user.active_booster.left_duration} votes.',
                                 error=True
@@ -539,7 +513,7 @@ class FameBot:
                         return
                     boo = Booster.from_name(select.values[0])
                     fame_user.activate_booster(boo())
-                    emb = self.get_base_embed(
+                    emb = get_base_embed(
                         interaction.user,
                         title=f'{boo.symbol} You have activated a {boo.name}!',
                         description=f'Your points and xp gains will increase by {boo.format_boost()} for the next {boo.duration} votes.',
@@ -557,7 +531,7 @@ class FameBot:
             descr = f'Total gain from titles: {fame_user.title_xp_incr}xp (20xp -> {20 + fame_user.title_xp_incr}xp)'
         else:
             descr = 'You don\'t have any titles yet! Keep voting to gain some.'
-        embed = self.get_base_embed(ctx.user, 'Your titles', description=descr)
+        embed = get_base_embed(ctx.user, 'Your titles', description=descr)
 
         for rarity, role_list in self.title_roles.items():
             txt = ''
@@ -586,7 +560,7 @@ class FameBot:
         else:
             return True
 
-        await ctx.respond(embed=self.get_base_embed(ctx.author, 'Action failed', description=description, error=True), ephemeral=True)
+        await ctx.respond(embed=get_base_embed(ctx.author, 'Action failed', description=description, error=True), ephemeral=True)
         return False
 
     async def check_roles(self, ctx: ApplicationContext | Interaction, fame_user: FameUser):
@@ -614,16 +588,25 @@ class FameBot:
 
         self.role_checks.remove(fame_user.user_id)
 
-    async def check_giveaway(self, fame_user: FameUser) -> None:
+    async def check_streak(self, ctx: ApplicationContext | Interaction, fame_user: FameUser) -> None:
         if fame_user.daily_votes != self.min_daily_votes:
             return
-
         fame_user.daily_streak += 1
+
         dc_user = await self.fetch_dc_user(fame_user.user_id)
         await self.giveaway_channel.send(f'{dc_user.mention} has joined the giveaway! Your daily streak is now {fame_user.daily_streak}.')
 
+        reward = StreakReward.generate(fame_user.daily_streak, list(self.titles))
+        reward.apply(fame_user)
+        self.role_checks.append(fame_user.user_id)
+
+        embed = get_streak_embed(reward)
+        await ctx.channel.send(dc_user.mention, embed=embed)
+
     def reset_daily_votes(self):
         for user in self.users:
+            if user.daily_votes < self.min_daily_votes:
+                user.daily_streak = 0
             user.daily_votes = 0
             user.save()
 
@@ -631,7 +614,7 @@ class FameBot:
         giveaway = Giveaway.generate()
         self.daily_giveaway = giveaway
 
-        embed = self.get_base_embed(self.bot.user, ':gift: Daily giveaway',
+        embed = get_base_embed(self.bot.user, ':gift: Daily giveaway',
                                     description='Today\'s awards:\n' + str(giveaway))
         embed.add_field(name='How to participate?',
                         value=f'Anyone who does {self.min_daily_votes} or more votes in the next 24 hours enters the giveaway.')
@@ -642,7 +625,7 @@ class FameBot:
         participating = [user for user in self.users if user.daily_votes >= self.min_daily_votes]
         if not participating:
             await self.giveaway_channel.send(
-                embed=self.get_base_embed(self.bot.user, 'No participants in the daily giveaway.')
+                embed=get_base_embed(self.bot.user, 'No participants in the daily giveaway.')
             )
             return
 
@@ -650,7 +633,7 @@ class FameBot:
         self.daily_giveaway.apply(winner)
 
         winner_dc = await self.fetch_dc_user(winner.user_id)
-        embed = self.get_base_embed(winner_dc, f'{winner_dc.display_name} has won!',
+        embed = get_base_embed(winner_dc, f'{winner_dc.display_name} has won!',
                                     description=f'You have gained the following rewards:\n{self.daily_giveaway}')
         await self.giveaway_channel.send(embed=embed)
         self.daily_giveaway = None
@@ -680,7 +663,7 @@ class FameBot:
             values = {'points': point_values, 'votes': vote_values}
 
         max_pages = 0
-        embed = self.get_base_embed(user, title=f':earth_africa: Top {scope.lower()} {topic_str}')
+        embed = get_base_embed(user, title=f':earth_africa: Top {scope.lower()} {topic_str}')
         for ctype, data in values.items():
             str_list = []
             for item_indicator, count in data.items():
@@ -810,7 +793,7 @@ class FameBot:
             user = self.get_user(ctx.author.id)
             if user.next_vote and not user.vote_ready:
                 rem = user.remaining_cooldown
-                embed = self.get_base_embed(
+                embed = get_base_embed(
                         ctx.author, 'Slow down!',
                         description=f'Voting is on cooldown for {ceil(rem)} second{"s" if rem>1 else ""}.',
                         error=True)
@@ -823,7 +806,7 @@ class FameBot:
                 return
 
             vote_args = self.vote_args(alpha2, c_name, user, ctx.author)
-            await self.check_giveaway(user)
+            await self.check_streak(ctx, user)
             await self.check_roles(ctx, user)
             await ctx.respond(**vote_args)
 
@@ -877,7 +860,7 @@ class FameBot:
                         user.daily_votes = 0
             clear_database(**kwargs)
 
-            await ctx.respond(embed=self.get_base_embed(ctx.author, f'{scope.capitalize()} cleared', description='Hope you know what you are doing!'), ephemeral=True)
+            await ctx.respond(embed=get_base_embed(ctx.author, f'{scope.capitalize()} cleared', description='Hope you know what you are doing!'), ephemeral=True)
 
         @country_cmds.command(
             name='set',
@@ -897,13 +880,13 @@ class FameBot:
                 return
 
             if ctype not in [VOTES, POINTS]:
-                await ctx.respond(embed=self.get_base_embed(ctx.author, 'Unknown ctype!', desccription='Use "votes" or "points".'), ephemeral=True)
+                await ctx.respond(embed=get_base_embed(ctx.author, 'Unknown ctype!', desccription='Use "votes" or "points".'), ephemeral=True)
                 return
 
             recap = self.get_recap('alltime')
             recap.set(alpha2, **{ctype: amount})
             recap.save()
-            await ctx.respond(embed=self.get_base_embed(ctx.author, 'Data changed', description=f'{ctype.capitalize()} for {alpha2_to_country(alpha2)} ({alpha2}) set to {amount}!'), ephemeral=True)
+            await ctx.respond(embed=get_base_embed(ctx.author, 'Data changed', description=f'{ctype.capitalize()} for {alpha2_to_country(alpha2)} ({alpha2}) set to {amount}!'), ephemeral=True)
 
         @country_cmds.command(
             name='clear',
@@ -933,7 +916,7 @@ class FameBot:
             vote_count, point_count = c_data[VOTES], c_data[POINTS]
             vote_rank, points_rank = self.get_rank(alpha2, VOTES), self.get_rank(alpha2, POINTS)
 
-            embed = self.get_base_embed(ctx.author, title=format_cname(alpha2, c_name))
+            embed = get_base_embed(ctx.author, title=format_cname(alpha2, c_name))
             embed.add_field(name='Points',
                             value=f'{millify(point_count)} (#{points_rank}{get_rank_symbol(points_rank)})', inline=True)
             embed.add_field(name='Votes',
@@ -1025,7 +1008,7 @@ class FameBot:
                 dt = next_claim - time()
                 if dt > 0:
                     await ctx.respond(
-                        embed=self.get_base_embed(ctx.author, 'Too early!', description=f'Wait {round(dt/60/60, 1)} hours before claiming your daily award again.', error=True),
+                        embed=get_base_embed(ctx.author, 'Too early!', description=f'Wait {round(dt/60/60, 1)} hours before claiming your daily award again.', error=True),
                         ephemeral=True)
                     return
 
@@ -1043,7 +1026,7 @@ class FameBot:
             fame_user.update_daily_claim()
             fame_user.save()
 
-            embed = self.get_base_embed(
+            embed = get_base_embed(
                 ctx.author, title=f'{self.daily_votes} daily votes registered for {format_cname(alpha2, c_name)}! ({incr_symbol(points_gained)}{millify(points_gained)} pt.)'
             )
             embed.add_field(name='Points',
@@ -1064,7 +1047,7 @@ class FameBot:
                 return
             self.on_maintenance = value
 
-            await ctx.respond(embed=self.get_base_embed(
+            await ctx.respond(embed=get_base_embed(
                 ctx.author, f'Maintenance {"activated" if value else "disabled"}!',
                 description='Only admins are able to use the bot while active.'), ephemeral=True
             )
@@ -1089,7 +1072,7 @@ class FameBot:
 
             fame_user = self.get_user(user.id)
 
-            embed = self.get_base_embed(ctx.author, title=f'{user.name}\'s Profile')
+            embed = get_base_embed(ctx.author, title=f'{user.name}\'s Profile')
             embed.add_field(name='Leveling',
                             value=fame_user.leveling_formatted +
                                   f'\n{ceil(fame_user.xp_until_next_level)}xp until next level',

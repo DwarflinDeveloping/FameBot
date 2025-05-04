@@ -1,9 +1,11 @@
 import dataclasses
-from abc import ABC, abstractmethod, abstractclassmethod
+from abc import ABC, abstractmethod, abstractclassmethod, abstractproperty, abstractstaticmethod
 import random
-from typing import Type, List, Self
+from math import floor
+from typing import Type, List, Self, Tuple, Dict
 
 from data.boosters import Booster, DailyBooster, TurboBooster, VoteBooster
+from data.titles import Title
 from data.users import FameUser
 
 
@@ -72,31 +74,46 @@ class BoosterPrice(GiveawayPrice):
         booster = Booster.from_dict(data['booster']).__class__
         return cls(booster, data['amount'])
 
-price_types = (BoosterPrice, XPPrice)
+@dataclasses.dataclass(frozen=True)
+class TitlePrice(GiveawayPrice):
+    title: Title
 
-XP_PRICES = {XPPrice(500): 7, XPPrice(750): 6, XPPrice(1000): 5, XPPrice(1500): 3, XPPrice(2500): 1}
-BOOSTER_PRICES_1 = {None: 5, BoosterPrice(TurboBooster, 1): 3, BoosterPrice(TurboBooster, 3): 1}
-BOOSTER_PRICES_2 = {BoosterPrice(VoteBooster, 1): 3, BoosterPrice(VoteBooster, 2): 3, BoosterPrice(VoteBooster, 3): 1}
-BOOSTER_PRICES_3 = {BoosterPrice(DailyBooster): 1}
+    def __str__(self) -> str:
+        return self.title.name
 
-RANDOM_PRICES = (XP_PRICES, BOOSTER_PRICES_1, BOOSTER_PRICES_2, BOOSTER_PRICES_3)
+    def __iter__(self):
+        yield from super().__iter__()
+        yield 'title', dict(self.title)
 
-def generate_prices() -> List[Type[GiveawayPrice]]:
-    prices = []
-    for category in RANDOM_PRICES:
-        price = random.choices(list(category.keys()), weights=list(category.values()), k=1)[0]
-        if price:
-            prices.append(price)
-    return prices
-
-
-@dataclasses.dataclass()
-class Giveaway:
-    prices: List[Type[GiveawayPrice]]
+    def apply(self, user: FameUser) -> None:
+        user.add_title(self.title)
 
     @classmethod
-    def generate(cls) -> Self:
-        return cls(generate_prices())
+    def from_dict(cls, data: dict) -> Self:
+        return cls(Title(data['name'], data['rarity']))
+
+price_types = (BoosterPrice, XPPrice)
+
+@dataclasses.dataclass()
+class PriceList(ABC):
+    prices: List[Type[GiveawayPrice]]
+
+    @abstractstaticmethod
+    def random_prices(*args, **kwargs) -> Tuple[Dict[GiveawayPrice | None, int], ...]:
+        ...
+
+    @classmethod
+    def generate(cls, *args, **kwargs) -> Self:
+        prices = []
+        for category in cls.random_prices(*args, **kwargs):
+            price = random.choices(list(category.keys()), weights=list(category.values()), k=1)[0]
+            if price:
+                prices.append(price)
+        return cls(prices)
+
+    @classmethod
+    def from_dict(cls, value: dict) -> Self:
+        return cls([GiveawayPrice.find_from_dict(price) for price in value['prices']])
 
     def __str__(self) -> str:
         return '\n'.join([f'- {price}' for price in self.prices])
@@ -104,10 +121,33 @@ class Giveaway:
     def __iter__(self):
         yield 'prices', [dict(price) for price in self.prices]
 
-    @classmethod
-    def from_dict(cls, value: dict) -> Self:
-        return cls([GiveawayPrice.find_from_dict(price) for price in value['prices']])
-
     def apply(self, user: FameUser) -> None:
         for price in self.prices:
             price.apply(user)
+
+
+@dataclasses.dataclass()
+class Giveaway(PriceList):
+    prices: List[Type[GiveawayPrice]]
+
+    @staticmethod
+    def random_prices() -> Tuple[Dict[GiveawayPrice | None, int], ...]:
+        return \
+            {XPPrice(500): 7, XPPrice(750): 6, XPPrice(1000): 5, XPPrice(1500): 3, XPPrice(2500): 1}, \
+            {None: 5, BoosterPrice(TurboBooster, 1): 3, BoosterPrice(TurboBooster, 3): 1}, \
+            {BoosterPrice(VoteBooster, 1): 3, BoosterPrice(VoteBooster, 2): 3, BoosterPrice(VoteBooster, 3): 1}, \
+            {BoosterPrice(DailyBooster): 1}
+
+
+@dataclasses.dataclass()
+class StreakReward(PriceList):
+    prices: List[Type[GiveawayPrice]]
+
+    @staticmethod
+    def random_prices(daily_streak: int, titles: List[Title]) -> Tuple[Dict[GiveawayPrice | None, int], ...]:
+        viable = [title for title in titles if title.rarity not in ('COMMON', 'RARE')]
+        return \
+            {XPPrice(floor(100 * (daily_streak ** .8))): 7, XPPrice(floor(150 * (daily_streak ** .8))): 6, XPPrice(floor(200 * (daily_streak ** .8))): 5, XPPrice(floor(250 * (daily_streak ** .8))): 3, XPPrice(floor(500 * (daily_streak ** .8))): 1}, \
+            {None: 5, BoosterPrice(TurboBooster, 1): 1}, \
+            {None: 1, BoosterPrice(DailyBooster): 1}, \
+            {None: 1 - sum(title.spawn_chance * 20 for title in viable)} | {TitlePrice(title): title.spawn_chance * 20 for title in viable}
