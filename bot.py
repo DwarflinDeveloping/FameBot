@@ -582,7 +582,7 @@ class FameBot:
         if fame_user.total_votes >= 10000:
             wanted_roles.append(special_role)
 
-        for role_id in list(self.progression_roles.values()) + sum(self.title_role_ids.values(), []):
+        for role_id in list(self.progression_roles.values()) + sum(self.title_role_ids.values(), []) + [special_role]:
             role = guild.get_role(role_id)
             if role in present_roles and not role in wanted_roles:
                 await user.remove_roles(role)
