@@ -47,15 +47,15 @@ class Booster:
         return f'{amount_prefix}{cls.symbol} {cls.name}'
 
 class StarterBooster(Booster):
-    name = 'Starter Booster'
+    name = 'Starter Firepower'
     symbol = '🔥'
-    boost = 4.00
+    boost = 3.00
     duration = 50
     spawn_chance = 0
     color = Color.dark_red()
 
 class RoleUpBooster(Booster):
-    name = 'Role Up Booster'
+    name = 'Role Up Firepower'
     symbol = '⏫'
     boost = 1.00
     duration = 20
@@ -63,7 +63,7 @@ class RoleUpBooster(Booster):
     color = Color.yellow()
 
 class VoteBooster(Booster):
-    name = 'Voting Booster'
+    name = 'Voting Firepower'
     symbol = '⬆️'
     boost = 0.50
     duration = 20
@@ -71,7 +71,7 @@ class VoteBooster(Booster):
     color = Color.blue()
 
 class TurboBooster(Booster):
-    name = 'Turbo Booster'
+    name = 'Turbo Firepower'
     symbol = '💎'
     boost = 1.50
     duration = 30
@@ -79,7 +79,7 @@ class TurboBooster(Booster):
     color = Color.red()
 
 class DailyBooster(Booster):
-    name = 'Daily Booster'
+    name = 'Daily Firepower'
     symbol = '🎁'
     boost = 1.50
     duration = 30

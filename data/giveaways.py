@@ -145,9 +145,12 @@ class StreakReward(PriceList):
 
     @staticmethod
     def random_prices(daily_streak: int, titles: List[Title]) -> Tuple[Dict[GiveawayPrice | None, int], ...]:
-        viable = [title for title in titles if title.rarity not in ('COMMON', 'RARE')]
-        return \
-            {XPPrice(floor(100 * (daily_streak ** .8))): 7, XPPrice(floor(150 * (daily_streak ** .8))): 6, XPPrice(floor(200 * (daily_streak ** .8))): 5, XPPrice(floor(250 * (daily_streak ** .8))): 3, XPPrice(floor(500 * (daily_streak ** .8))): 1}, \
-            {None: 5, BoosterPrice(TurboBooster, 1): 1}, \
-            {None: 1, BoosterPrice(DailyBooster): 1}, \
-            {None: 1 - sum(title.spawn_chance * 20 for title in viable)} | {TitlePrice(title): title.spawn_chance * 20 for title in viable}
+        viable_titles = [title for title in titles if title.rarity not in ('COMMON', 'RARE')]
+        cum_title_chances = sum(title.spawn_chance * 20 for title in viable_titles)
+        prices = (
+            {XPPrice(floor(100 * (daily_streak ** .8))): 7, XPPrice(floor(150 * (daily_streak ** .8))): 6, XPPrice(floor(200 * (daily_streak ** .8))): 5, XPPrice(floor(250 * (daily_streak ** .8))): 3, XPPrice(floor(500 * (daily_streak ** .8))): 1},
+            {None: 5, BoosterPrice(TurboBooster, 1): 1},
+            {None: 1, BoosterPrice(DailyBooster): 1},
+            {None: 1 - cum_title_chances} | {TitlePrice(title): title.spawn_chance * 20 for title in viable_titles}
+        )
+        return prices

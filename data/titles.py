@@ -3,14 +3,15 @@ from typing import Literal
 
 from discord import Color
 
-RARITIES = Literal['COMMON', 'RARE', 'SUPER_RARE', 'MYTHIC', 'LEGENDARY']
+RARITIES = Literal['COMMON', 'RARE', 'SUPER_RARE', 'MYTHIC', 'LEGENDARY', 'SPECIAL']
 
 RARITY_COLORS = {
     'COMMON': Color.greyple(),
     'RARE': Color.blue(),
     'SUPER_RARE': Color.dark_blue(),
     'MYTHIC': Color.fuchsia(),
-    'LEGENDARY': Color.gold()
+    'LEGENDARY': Color.gold(),
+    'SPECIAL': Color.dark_purple()
 }
 
 RARITY_XP = {
@@ -18,15 +19,17 @@ RARITY_XP = {
     'RARE': 2,
     'SUPER_RARE': 3,
     'MYTHIC': 4,
-    'LEGENDARY': 5
+    'LEGENDARY': 5,
+    'SPECIAL': 8
 }
 
 RARITY_CHANCES = {
-    'COMMON': .010,
-    'RARE': .207,
-    'SUPER_RARE': .206,
-    'MYTHIC': .205,
-    'LEGENDARY': .002
+    'COMMON': .0100,
+    'RARE': .0050,
+    'SUPER_RARE': .0025,
+    'MYTHIC': .0010,
+    'LEGENDARY': .0005,
+    'SPECIAL': 0
 }
 
 

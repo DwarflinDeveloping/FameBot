@@ -282,7 +282,7 @@ class FameBot:
         for rarity, role_list in self.title_roles.items():
             chance = RARITY_CHANCES.get(rarity)
             per_role_weight = chance / len(role_list)
-            roles.extend([(role_id, rarity) for role_id in role_list])
+            roles.extend([(role, rarity) for role in role_list])
             weights.extend([per_role_weight] * len(role_list))
 
         roles.append(None)
@@ -296,6 +296,7 @@ class FameBot:
         title = Title(role.name, rarity)
         if not user.has_title(title.name):
             user.add_title(title)
+            user.save()
             self.role_checks.append(user.user_id)
             compensation = False
         else:
@@ -341,7 +342,7 @@ class FameBot:
         new_order = (self.get_order(POINTS), self.get_order(VOTES))
         new_level = user.level
         self.update_recap_ranks(prev_order, new_order)
-        if old_level != new_level:
+        if old_level != new_level or user.total_votes == 1:
             self.role_checks.append(user.user_id)
 
         return points_gained, xp_gained
@@ -468,7 +469,7 @@ class FameBot:
         if role_up:
             booster = RoleUpBooster()
             fame_user.add_booster(booster)
-            vote_args['embeds'].append(self.get_booster_embed(booster))
+            vote_args['embeds'].append(get_booster_embed(booster))
 
         view = VoteView()
         vote_args['view'] = view
@@ -577,6 +578,10 @@ class FameBot:
         wanted_roles = [role for role in sum(self.title_roles.values(), []) if fame_user.has_title(role.name)]
         wanted_roles.append(guild.get_role(fame_user.get_role(self.progression_roles)))
 
+        special_role = 1365849684177981621
+        if fame_user.total_votes >= 10000:
+            wanted_roles.append(special_role)
+
         for role_id in list(self.progression_roles.values()) + sum(self.title_role_ids.values(), []):
             role = guild.get_role(role_id)
             if role in present_roles and not role in wanted_roles:
@@ -585,6 +590,8 @@ class FameBot:
                 await user.add_roles(role)
                 if role_id in self.progression_roles.values():  # is progression role
                     await channel.send(f'{ctx.user.mention} has reached **Lvl. {fame_user.level}**! You are now a {role.name}!')
+                elif role_id == special_role:
+                    await channel.send(f'{ctx.user.mention} has reached **10,000 votes**! You have been awarded {role.name}')
 
         self.role_checks.remove(fame_user.user_id)
 
@@ -615,7 +622,7 @@ class FameBot:
         self.daily_giveaway = giveaway
 
         embed = get_base_embed(self.bot.user, ':gift: Daily giveaway',
-                                    description='Today\'s awards:\n' + str(giveaway))
+                                    description='Today\'s rewards:\n' + str(giveaway))
         embed.add_field(name='How to participate?',
                         value=f'Anyone who does {self.min_daily_votes} or more votes in the next 24 hours enters the giveaway.')
         await self.giveaway_channel.send(embed=embed)
@@ -815,7 +822,7 @@ class FameBot:
             await ctx.edit(view=vote_args['view'])
 
             await asyncio.sleep(60)
-            vote_args['view'].set_again_state(False)
+            vote_args['view'].disable_all_items()
             await ctx.edit(view=vote_args['view'])
 
         @self.bot.slash_command(

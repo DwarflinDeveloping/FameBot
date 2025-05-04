@@ -56,6 +56,21 @@ class FameUser:
             self.additional_xp = self.data['additional_xp']
             del self.data['additional_xp']
 
+        def update_legacy_booster(b_name: str):
+            if b_name.endswith('Booster'):
+                return b_name.replace('Booster', 'Firepower')
+            return b_name
+
+        booster_names = list(self.data['boosters'].keys()).copy()
+        for original_name in booster_names:
+            updated_name = update_legacy_booster(original_name)
+            if updated_name != original_name:
+                self.data['boosters'][updated_name] = self.data['boosters'][original_name]
+                del self.data['boosters'][original_name]
+
+        if self.data['active_booster']:
+            self.data['active_booster']['name'] = update_legacy_booster(self.data['active_booster']['name'])
+
     @property
     def total_votes(self) -> int:
         return self.data['total']['votes']
