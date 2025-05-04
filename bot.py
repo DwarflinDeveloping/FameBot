@@ -16,11 +16,12 @@ from discord import default_permissions, ApplicationContext, Interaction, Button
 from discord.ext import tasks
 
 from data import load_app_data, save_game_data, flags_dir, users_dir, clear_database, USER_DATA_PRESET, \
-    PV_PRESET, make_dirs, load_game_data, save_app_data
+    PV_PRESET, make_dirs, load_game_data, save_app_data, titles
 from data.boosters import RoleUpBooster, Booster, boosters
-from data.giveaways import generate_prices, Giveaway
+from data.giveaways import Giveaway
 from data.recaps import save_data, FameRecap
 from data.resources import get_banner_path, get_banner, get_flag
+from data.titles import RARITY_CHANCES, Title, RARITY_XP
 from data.trivia import get_mappings, load_trivia
 from data.users import FameUser
 from utils import sort_dict, alpha2_to_country, country_to_alpha2, ALTERNATIVE_CNAMES, incr_symbol, \
@@ -30,7 +31,7 @@ from utils import sort_dict, alpha2_to_country, country_to_alpha2, ALTERNATIVE_C
 
 class FameBot:
     def __init__(self, cooldown: float = 5, daily_votes: int = 30, recap_scopes: List[str] = None,
-                 leaderboard_topics: List[str] = None, upload_images: bool = False, min_daily_votes: int = 2):
+                 leaderboard_topics: List[str] = None, upload_images: bool = False, min_daily_votes: int = 30):
         if recap_scopes is None:
             self.visible_recap_scopes = ['daily', 'weekly', 'seasonal']
             self.recap_scopes = self.visible_recap_scopes + ['alltime']
@@ -48,6 +49,7 @@ class FameBot:
         self.min_daily_votes = min_daily_votes
 
         self.bot: Bot | None = None
+        self.title_roles = None
         self.app_data = load_app_data()
         self.game_data = load_game_data()
         self.trivia_df = load_trivia()
@@ -99,7 +101,6 @@ class FameBot:
     @property
     def daily_giveaway(self) -> Giveaway | None:
         giveaway = self.game_data['daily_giveaway']
-        print(self.game_data['daily_giveaway'])
         if giveaway is None:
             return None
         return Giveaway.from_dict(giveaway)
@@ -121,6 +122,10 @@ class FameBot:
     def admin_guilds(self) -> List[int]:
         return self.app_data['admin_guilds']
 
+    @property
+    def main_guild(self) -> int:
+        return self.app_data['main_guild']
+
     @cached_property
     def giveaway_channel(self) -> TextChannel:
         return self.bot.get_channel(self.app_data['giveaway_channel'])
@@ -138,7 +143,7 @@ class FameBot:
         return {int(key): val for key, val in self.app_data['progression_roles'].items()}
 
     @property
-    def title_roles(self) -> Dict[int, List[int]]:
+    def title_role_ids(self) -> Dict[str, List[int]]:
         return self.app_data['title_roles']
 
     def get_order(self, ctype: CTYPES, recap_scope: str = 'alltime') -> List[str]:
@@ -260,6 +265,19 @@ class FameBot:
         )
         return embed
 
+    @staticmethod
+    def get_title_embed(title: Title, compensation: bool = False):
+        if compensation:
+            descr1 = f'Since you already have this title, you instead get {title.compensation} xp.'
+        else:
+            descr1 = f'This title will make you gain {title.xp_incr} more xp per vote permanently.\n'
+        embed = discord.Embed(
+            title=f':speech_balloon: You have found a {title.formatted_rarity} title: {title.name}!',
+            colour=title.color,
+            description=descr1 + '\nView your title collection using **/titles**'
+        )
+        return embed
+
     def calc_incr_legacy(self, votes_count: int) -> int:
         # old way of calculating point increments
         return sum([self.total_votes+i-1 for i in range(votes_count)])
@@ -282,6 +300,35 @@ class FameBot:
 
             if changes:
                 recap.save()
+
+    def spawn_titles(self, user: FameUser) -> Embed | None:
+        roles = []
+        weights = []
+
+        for rarity, role_list in self.title_roles.items():
+            chance = RARITY_CHANCES.get(rarity)
+            per_role_weight = chance / len(role_list)
+            roles.extend([(role_id, rarity) for role_id in role_list])
+            weights.extend([per_role_weight] * len(role_list))
+
+        roles.append(None)
+        weights.append(1 - sum(weights))
+
+        result = random.choices(roles, weights=weights, k=1)[0]
+        if result is None:
+            return None
+
+        role, rarity = result
+        title = Title(role.name, rarity)
+        if not user.has_title(title.name):
+            user.add_title(title)
+            self.role_checks.append(user.user_id)
+            compensation = False
+        else:
+            user.title_dupl_xp += title.compensation
+            compensation = True
+
+        return self.get_title_embed(title, compensation)
 
     def spawn_boosters(self, user: FameUser, guaranteed: bool = False) -> discord.Embed | None:
         user.check_starter_booster()
@@ -331,6 +378,7 @@ class FameBot:
 
     def vote_args(self, alpha2, c_name: str, fame_user: FameUser, user: User) -> Dict[str, Any]:
         booster_embed = self.spawn_boosters(fame_user, guaranteed=True if fame_user.last_booster >= 75 else False)
+        title_embed = self.spawn_titles(fame_user)
 
         fame_user.update_next_vote(self.cooldown)
         fame_user.daily_votes += 1
@@ -365,7 +413,7 @@ class FameBot:
                         inline=True)
         embed.add_field(name='Your stats',
                         value=f'Level: {fame_user.level} (#{user_rank}{get_rank_symbol(user_rank)})\n'
-                              f'+{xp_gained}XP ({ceil(fame_user.xp_until_next_level)}XP until next level)' +
+                              f'+{xp_gained}xp ({ceil(fame_user.xp_until_next_level)}xp until next level)' +
                               (f'\nBooster duration: {active_booster.left_duration} -> {left_duration}' if fame_user.has_active_booster else ''),
                         inline=True)
 
@@ -440,8 +488,9 @@ class FameBot:
                         break
 
         vote_args['embeds'].append(embed)
-        if booster_embed is not None:
-            vote_args['embeds'].append(booster_embed)
+        for embed in [booster_embed, title_embed]:
+            if embed is not None:
+                vote_args['embeds'].append(embed)
         if role_up:
             booster = RoleUpBooster()
             fame_user.add_booster(booster)
@@ -459,7 +508,7 @@ class FameBot:
 
         for booster, count in fame_user.boosters:
             embed.add_field(name=booster.format_name(count),
-                            value=f'Boost factor: {booster.format_boost()} (10xp -> {floor(10 * (1 + booster.boost))}xp)\n'
+                            value=f'Boost factor: {booster.format_boost()} (20xp -> {floor(20 * (1 + booster.boost))}xp)\n'
                                   f'Duration: {booster.duration} votes',
                             inline=False)
 
@@ -493,12 +542,37 @@ class FameBot:
                     emb = self.get_base_embed(
                         interaction.user,
                         title=f'{boo.symbol} You have activated a {boo.name}!',
-                        description=f'Your points and XP gains will increase by {boo.format_boost()} for the next {boo.duration} votes.',
+                        description=f'Your points and xp gains will increase by {boo.format_boost()} for the next {boo.duration} votes.',
                         colour=boo.color
                     )
                     await interaction.respond(embed=emb)
 
         return {'embed': embed, 'view': BoosterSelect()}
+
+    def title_args(self, ctx: ApplicationContext | Interaction):
+        fame_user = self.get_user(ctx.user.id)
+        fame_user.check_starter_booster()
+        has_boosters = len(list(fame_user.boosters)) > 0
+        if list(fame_user.titles):
+            descr = f'Total gain from titles: {fame_user.title_xp_incr}xp (20xp -> {20 + fame_user.title_xp_incr}xp)'
+        else:
+            descr = 'You don\'t have any titles yet! Keep voting to gain some.'
+        embed = self.get_base_embed(ctx.user, 'Your titles', description=descr)
+
+        for rarity, role_list in self.title_roles.items():
+            txt = ''
+            for role in role_list:
+                title = Title(role.name, rarity)
+                if title.name in [r.name for r in fame_user.titles]:
+                    txt += f'{title.name}\n'
+                else:
+                    txt += '???\n'
+
+            embed.add_field(name=' '.join([s.capitalize() for s in rarity.lower().split('_')]) + f' (+{RARITY_XP[rarity]} xp)',
+                            value=txt,
+                            inline=False)
+
+        return {'embed': embed}
 
     async def check_permissions(self, ctx: ApplicationContext | Interaction, admin_only: bool) -> bool:
         is_admin = ctx.user.id in self.admin_ids
@@ -526,15 +600,17 @@ class FameBot:
             return  # only role checking on the FAME server
 
         present_roles = user.roles
-        wanted_role = guild.get_role(fame_user.get_role(self.progression_roles))
+        wanted_roles = [role for role in sum(self.title_roles.values(), []) if fame_user.has_title(role.name)]
+        wanted_roles.append(guild.get_role(fame_user.get_role(self.progression_roles)))
 
-        for role_id in self.progression_roles.values():
+        for role_id in list(self.progression_roles.values()) + sum(self.title_role_ids.values(), []):
             role = guild.get_role(role_id)
-            if role in present_roles and not role == wanted_role:
+            if role in present_roles and not role in wanted_roles:
                 await user.remove_roles(role)
-            elif role not in present_roles and role == wanted_role:
+            elif role not in present_roles and role in wanted_roles:
                 await user.add_roles(role)
-                await channel.send(f'{ctx.user.mention} has reached **Lvl. {fame_user.level}**! You are now a {role.name}!')
+                if role_id in self.progression_roles.values():  # is progression role
+                    await channel.send(f'{ctx.user.mention} has reached **Lvl. {fame_user.level}**! You are now a {role.name}!')
 
         self.role_checks.remove(fame_user.user_id)
 
@@ -711,6 +787,9 @@ class FameBot:
 
         clear_database(recaps=list(channels.keys()))
         await asyncio.sleep(100)
+
+    def update_title_roles(self) -> None:
+        self.title_roles = {rarity: [self.bot.get_guild(self.main_guild).get_role(role) for role in roles_list] for rarity, roles_list in self.title_role_ids.items()}
 
     def register_cmds(self):
         country_cmds = SlashCommandGroup('country', 'country-related commands')
@@ -1013,7 +1092,7 @@ class FameBot:
             embed = self.get_base_embed(ctx.author, title=f'{user.name}\'s Profile')
             embed.add_field(name='Leveling',
                             value=fame_user.leveling_formatted +
-                                  f'\n{ceil(fame_user.xp_until_next_level)}XP until next level',
+                                  f'\n{ceil(fame_user.xp_until_next_level)}xp until next level',
                             inline=False)
             embed.add_field(name='Total votes', value=str(fame_user.total_votes), inline=True)
             embed.add_field(name='Total points', value=str(fame_user.total_points), inline=True)
@@ -1043,6 +1122,16 @@ class FameBot:
                 return
 
             await ctx.respond(**self.booster_args(ctx))
+
+        @self.bot.slash_command(
+            name='titles',
+            description='View your title collection'
+        )
+        async def titles_cmd(ctx: ApplicationContext):
+            if not await self.check_permissions(ctx, False):
+                return
+
+            await ctx.respond(**self.title_args(ctx))
 
         @self.bot.slash_command(
             name='help',
@@ -1079,6 +1168,10 @@ class FameBot:
         self.bot.add_application_command(country_cmds)
         self.bot.add_application_command(top_cmds)
         self.bot.add_application_command(user_cmds)
+
+        @self.bot.listen(once=True)
+        async def on_ready():
+            self.update_title_roles()
 
     async def fetch_votes(self, channel: TextChannel):
         Path('users2').mkdir(exist_ok=True)

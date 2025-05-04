@@ -11,6 +11,7 @@ from discord import User
 
 from data import users_dir, USER_DATA_PRESET, PV_PRESET
 from data.boosters import StarterBooster, Booster
+from data.titles import Title
 
 
 @dataclasses.dataclass
@@ -105,6 +106,14 @@ class FameUser:
         self.data['leveling']['additional_xp'] = value
 
     @property
+    def title_dupl_xp(self) -> int:
+        return self.data['leveling']['title_dupl_xp']
+
+    @title_dupl_xp.setter
+    def title_dupl_xp(self, value: int) -> None:
+        self.data['leveling']['title_dupl_xp'] = value
+
+    @property
     def giveaway_xp(self) -> int:
         return self.data['leveling']['giveaway_xp']
 
@@ -153,10 +162,21 @@ class FameUser:
             if count != 0:
                 yield Booster.from_name(name), count
 
+    @property
+    def titles(self) -> Iterator[Title]:
+        for title_data in self.data['titles']:
+            yield Title(title_data['name'], title_data['rarity'])
+
     def add_booster(self, booster: Type[Booster], count: int = 1):
         if booster.name not in self.data['boosters']:
             self.data['boosters'][booster.name] = 0
         self.data['boosters'][booster.name] += count
+
+    def has_title(self, title_name: str):
+        return title_name in [title.name for title in self.titles]
+
+    def add_title(self, title: Title):
+        self.data['titles'].append(dict(title))
 
     @property
     def active_booster(self) -> Booster | None:
@@ -260,7 +280,7 @@ class FameUser:
 
     @property
     def total_xp(self):
-        return self.start_xp + self.vote_xp + self.giveaway_xp + self.gift_xp + self.additional_xp
+        return self.start_xp + self.vote_xp + self.giveaway_xp + self.gift_xp + self.title_dupl_xp + self.additional_xp
 
     @property
     def next_level_xp(self) -> float:
@@ -300,8 +320,12 @@ class FameUser:
         return self.level
 
     @property
+    def title_xp_incr(self) -> int:
+        return sum([title.xp_incr for title in self.titles])
+
+    @property
     def xp_per_vote(self) -> int:
-        return 10
+        return 20 + self.title_xp_incr
 
     def get_country(self, alpha2: str) -> Dict[str, int]:
         return self.data['country'][alpha2]
