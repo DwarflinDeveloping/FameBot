@@ -1046,7 +1046,8 @@ class FameBot:
 
         @self.bot.slash_command(
             name='maintenance',
-            description='Toggle maintainance mode'
+            description='Toggle maintenance mode',
+            guild_ids=self.admin_guilds
         )
         @default_permissions(administrator=True)
         async def daily_cmd(ctx: ApplicationContext, value: Option(bool)):

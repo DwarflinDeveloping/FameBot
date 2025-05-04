@@ -82,8 +82,8 @@ class DailyBooster(Booster):
     name = 'Daily Firepower'
     symbol = '🎁'
     boost = 1.50
-    duration = 30
-    spawn_chance = 0.005
+    duration = 50
+    spawn_chance = 0
     color = Color.red()
 
 boosters = (StarterBooster, RoleUpBooster, VoteBooster, TurboBooster, DailyBooster)
