@@ -346,7 +346,7 @@ class FameBot:
             self.role_checks.append(user.user_id)
 
         special_title = Title('Denis the Menace', 'SPECIAL')
-        if not user.has_title(special_title.name) and user.total_votes >= 5:
+        if not user.has_title(special_title.name) and user.total_votes >= 10_000:
             user.add_title(special_title)
             user.save()
             self.role_checks.append(user.user_id)
