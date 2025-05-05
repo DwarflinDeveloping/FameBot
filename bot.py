@@ -651,6 +651,31 @@ class FameBot:
         await self.giveaway_channel.send(embed=embed)
         self.daily_giveaway = None
 
+    async def generate_chances(self, user: Member | User | ClientUser, topic: str) -> Dict[str, Any]:
+        embed = get_base_embed(user, f'{topic.lower().capitalize()} chances')
+
+        if topic == 'booster':
+            abs_weight = sum(booster.spawn_chance for booster in boosters)
+            for booster in boosters:
+                if booster.spawn_chance == 0:
+                    continue
+                rel_chance = booster.spawn_chance / abs_weight
+                abs_chance = .025 * rel_chance
+                embed.add_field(name=booster.format_name(), value=f'Relative Chance: {round(rel_chance*100, 2)}%\n'
+                                                                  f'Absolute Chance: {round(abs_chance*100, 3)}%\n'
+                                                                  f'1 in {ceil(1 / abs_chance)} votes',
+                                inline=False)
+        elif topic == 'title':
+            for title in self.titles:
+                if title.spawn_chance == 0:
+                    continue
+                abs_chance = title.spawn_chance
+                embed.add_field(name=title.name, value=f'Absolute Chance: {round(abs_chance * 100, 3)}%\n'
+                                                       f'1 in {ceil(1 / abs_chance)} votes', inline=False)
+
+        kwargs = {'embed': embed}
+        return kwargs
+
     async def generate_leaderboard(self, user: Member | User | ClientUser, scope: str, topic: str, page: int = 1,
                              entries_per_page: int = 20) -> Dict[str, Any]:
         is_recap = scope != 'alltime'
@@ -1073,6 +1098,16 @@ class FameBot:
                 return
 
             await ctx.respond(**await self.generate_leaderboard(ctx.user, scope, 'countries'))
+
+        @self.bot.slash_command(
+            name='chances',
+            description='View the chances behind the FAME bot'
+        )
+        async def recap_cmd(ctx: ApplicationContext, topic: Option(str, choices=['booster', 'title'])):
+            if not await self.check_permissions(ctx, False):
+                return
+
+            await ctx.respond(**await self.generate_chances(ctx.user, topic))
 
         @user_cmds.command(
             name='info',
