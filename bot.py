@@ -345,6 +345,12 @@ class FameBot:
         if old_level != new_level or user.total_votes == 1:
             self.role_checks.append(user.user_id)
 
+        special_title = Title('Denis the Menace', 'SPECIAL')
+        if not user.has_title(special_title.name) and user.total_votes >= 5:
+            user.add_title(special_title)
+            user.save()
+            self.role_checks.append(user.user_id)
+
         return points_gained, xp_gained
 
     def get_country_stats(self, alpha2: str, scope: str = 'alltime') -> Tuple[int, int, int, int]:
@@ -578,11 +584,8 @@ class FameBot:
         wanted_roles = [role for role in sum(self.title_roles.values(), []) if fame_user.has_title(role.name)]
         wanted_roles.append(guild.get_role(fame_user.get_role(self.progression_roles)))
 
-        special_role = 1365849684177981621
-        if fame_user.total_votes >= 10000:
-            wanted_roles.append(special_role)
-
-        for role_id in list(self.progression_roles.values()) + sum(self.title_role_ids.values(), []) + [special_role]:
+        all_roles = list(self.progression_roles.values()) + sum(self.title_role_ids.values(), [])
+        for role_id in all_roles:
             role = guild.get_role(role_id)
             if role in present_roles and not role in wanted_roles:
                 await user.remove_roles(role)
@@ -590,7 +593,7 @@ class FameBot:
                 await user.add_roles(role)
                 if role_id in self.progression_roles.values():  # is progression role
                     await channel.send(f'{ctx.user.mention} has reached **Lvl. {fame_user.level}**! You are now a {role.name}!')
-                elif role_id == special_role:
+                elif role_id == 1365849684177981621:
                     await channel.send(f'{ctx.user.mention} has reached **10,000 votes**! You have been awarded {role.name}')
 
         self.role_checks.remove(fame_user.user_id)
@@ -740,8 +743,6 @@ class FameBot:
         scopes = ['hourly']
         channels = {}
         if dt.hour == 0:
-            for user in self.users:
-                user.daily_votes = 0
             scopes.append('daily')
             channels['daily'] = 1363171417612353658
             if dt.weekday() == 0:
