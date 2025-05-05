@@ -22,9 +22,9 @@ def get_base_embed(user: User, title: str, error: bool = False, **kwargs) -> Emb
 
 def get_booster_embed(booster: Booster) -> Embed:
     embed = Embed(
-        title=f':mag_right: You have found a {booster.name} ({booster.format_boost()})!',
+        title=f':mag_right: You have found a {booster.format_name()} ({booster.format_boost()})!',
         colour=booster.color,
-        description=f'This booster lasts for {booster.duration} votes.\n'
+        description=f'This booster lasts for {booster.format_duration()} votes.\n'
                     'View your boosters using **/boosters**'
     )
     return embed

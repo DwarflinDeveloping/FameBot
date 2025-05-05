@@ -58,8 +58,13 @@ class FameUser:
 
         def update_legacy_booster(b_name: str):
             if b_name.endswith('Booster'):
-                return b_name.replace('Booster', 'Firepower')
-            return b_name
+                b_name = b_name.replace('Booster', 'Firepower')
+
+            legacy_names = {
+                'Voting Firepower': 'Bronze Firepower',
+                'Turbo Firepower': 'Gold Firepower'
+            }
+            return legacy_names.get(b_name, b_name)
 
         booster_names = list(self.data['boosters'].keys()).copy()
         for original_name in booster_names:

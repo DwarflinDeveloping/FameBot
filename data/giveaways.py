@@ -4,7 +4,7 @@ import random
 from math import floor
 from typing import Type, List, Self, Tuple, Dict
 
-from data.boosters import Booster, DailyBooster, TurboBooster, VoteBooster
+from data.boosters import Booster, DailyBooster, GoldBooster, BronzeBooster
 from data.titles import Title
 from data.users import FameUser
 
@@ -134,8 +134,8 @@ class Giveaway(PriceList):
     def random_prices() -> Tuple[Dict[GiveawayPrice | None, int], ...]:
         return \
             {XPPrice(500): 7, XPPrice(750): 6, XPPrice(1000): 5, XPPrice(1500): 3, XPPrice(2500): 1}, \
-            {None: 5, BoosterPrice(TurboBooster, 1): 3, BoosterPrice(TurboBooster, 3): 1}, \
-            {BoosterPrice(VoteBooster, 1): 3, BoosterPrice(VoteBooster, 2): 3, BoosterPrice(VoteBooster, 3): 1}, \
+            {None: 5, BoosterPrice(GoldBooster, 1): 3, BoosterPrice(GoldBooster, 3): 1}, \
+            {BoosterPrice(BronzeBooster, 1): 3, BoosterPrice(BronzeBooster, 2): 3, BoosterPrice(BronzeBooster, 3): 1}, \
             {BoosterPrice(DailyBooster): 1}
 
 
@@ -149,7 +149,7 @@ class StreakReward(PriceList):
         cum_title_chances = sum(title.spawn_chance * 20 for title in viable_titles)
         prices = (
             {XPPrice(floor(100 * (daily_streak ** .8))): 7, XPPrice(floor(150 * (daily_streak ** .8))): 6, XPPrice(floor(200 * (daily_streak ** .8))): 5, XPPrice(floor(250 * (daily_streak ** .8))): 3, XPPrice(floor(500 * (daily_streak ** .8))): 1},
-            {None: 5, BoosterPrice(TurboBooster, 1): 1},
+            {None: 5, BoosterPrice(GoldBooster, 1): 1},
             {None: 1, BoosterPrice(DailyBooster): 1},
             {None: 1 - cum_title_chances} | {TitlePrice(title): title.spawn_chance * 20 for title in viable_titles}
         )

@@ -308,15 +308,15 @@ class FameBot:
     def spawn_boosters(self, user: FameUser, guaranteed: bool = False) -> discord.Embed | None:
         user.check_starter_booster()
         chances = list(booster.spawn_chance for booster in boosters)
-        if guaranteed:
+        booster_found = random.random() <= .03
+        if guaranteed or booster_found:
             total = sum(chances)
             if total == 0:
                 return None  # avoid division by 0
             normalized_chances = [c / total for c in chances]
             result = random.choices(list(boosters), weights=normalized_chances, k=1)[0]
         else:
-            chances.append(1 - sum(chances))
-            result = random.choices(list(boosters) + [None], weights=chances, k=1)[0]
+            return None
 
         if result is None:
             return None
@@ -395,7 +395,7 @@ class FameBot:
         embed.add_field(name='Your stats',
                         value=f'Level: {fame_user.level} (#{user_rank}{get_rank_symbol(user_rank)})\n'
                               f'+{xp_gained}xp ({ceil(fame_user.xp_until_next_level)}xp until next level)' +
-                              (f'\nBooster duration: {active_booster.left_duration} -> {left_duration}' if fame_user.has_active_booster else ''),
+                              (f'\nBooster duration: {active_booster.left_duration} -> {left_duration}' if active_booster is not None else ''),
                         inline=True)
 
         if self.upload_images:
@@ -490,7 +490,7 @@ class FameBot:
         for booster, count in fame_user.boosters:
             embed.add_field(name=booster.format_name(count),
                             value=f'Boost factor: {booster.format_boost()} (20xp -> {floor(20 * (1 + booster.boost))}xp)\n'
-                                  f'Duration: {booster.duration} votes',
+                                  f'Duration: {booster.format_duration()} votes',
                             inline=False)
 
         class BoosterSelect(discord.ui.View):
@@ -518,12 +518,12 @@ class FameBot:
                             ), ephemeral=True
                         )
                         return
-                    boo = Booster.from_name(select.values[0])
-                    fame_user.activate_booster(boo())
+                    boo = Booster.from_name(select.values[0])()
+                    fame_user.activate_booster(boo)
                     emb = get_base_embed(
                         interaction.user,
                         title=f'{boo.symbol} You have activated a {boo.name}!',
-                        description=f'Your points and xp gains will increase by {boo.format_boost()} for the next {boo.duration} votes.',
+                        description=f'Your points and xp gains will increase by {boo.format_boost()} for the next {boo.left_duration} votes.',
                         colour=boo.color
                     )
                     await interaction.respond(embed=emb)
