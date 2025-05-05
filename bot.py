@@ -574,10 +574,13 @@ class FameBot:
         if fame_user.user_id not in self.role_checks:
             return
 
+        if type(ctx) == ApplicationContext:
+            await ctx.defer()
+
         guild, channel = ctx.guild, self.role_up_channel
         user = ctx.author if type(ctx) == ApplicationContext else ctx.user
 
-        if type(user) != Member or guild.id != 378587218849300481:
+        if type(user) != Member or guild.id != self.main_guild:
             return  # only role checking on the FAME server
 
         present_roles = user.roles
