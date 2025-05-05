@@ -81,7 +81,7 @@ class BronzeBooster(Booster):
     symbol = '🟫'
     boost = 0.25
     base_duration = 20
-    spawn_chance = 100
+    spawn_chance = 110
     color = Color.from_rgb(140, 85, 65)
 
 class SilverBooster(Booster):
@@ -89,7 +89,7 @@ class SilverBooster(Booster):
     symbol = '🩶'
     boost = 0.50
     base_duration = 35
-    spawn_chance = 75
+    spawn_chance = 80
     color = Color.greyple()
 
 class GoldBooster(Booster):
@@ -104,39 +104,39 @@ class DiamondBooster(Booster):
     name = 'Diamond Firepower'
     symbol = '💎'
     boost = 2.50
-    base_duration = 80
+    base_duration = 70
     spawn_chance = 25
     color = Color.blue()
 
 class MythicBooster(Booster):
     name = 'Mythic Firepower'
     symbol = '🦄'
-    boost = 5.00
-    base_duration = 160
-    spawn_chance = 10
+    boost = 4.00
+    base_duration = 140
+    spawn_chance = 8
     color = Color.nitro_pink()
 
 class LegendaryBooster(Booster):
     name = 'Legendary Firepower'
     symbol = '🐲'
-    boost = 10.00
-    base_duration = 330
-    spawn_chance = 5
+    boost = 8.00
+    base_duration = 250
+    spawn_chance = 4
     color = Color.dark_green()
 
 class MastersBooster(Booster):
     name = 'Masters Firepower'
     symbol = '❤️'
-    boost = 25.00
-    base_duration = 700
+    boost = 16.00
+    base_duration = 500
     spawn_chance = 1
     color = Color.brand_red()
 
 class ProBooster(Booster):
     name = 'Pro Firepower'
     symbol = '🏆'
-    boost = 50.00
-    base_duration = 1300
+    boost = 32.00
+    base_duration = 1000
     spawn_chance = .5
     color = Color.dark_gold()
 

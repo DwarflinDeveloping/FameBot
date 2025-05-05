@@ -308,7 +308,7 @@ class FameBot:
     def spawn_boosters(self, user: FameUser, guaranteed: bool = False) -> discord.Embed | None:
         user.check_starter_booster()
         chances = list(booster.spawn_chance for booster in boosters)
-        booster_found = random.random() <= .03
+        booster_found = random.random() <= .025
         if guaranteed or booster_found:
             total = sum(chances)
             if total == 0:
