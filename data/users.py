@@ -238,7 +238,8 @@ class FameUser:
             if booster_applies and self.has_active_booster:
                 booster = self.active_booster
                 points_incr *= 1 + booster.boost
-                xp_incr *= 1 + booster.boost
+                if booster.boosts_xp:
+                    xp_incr *= 1 + booster.boost
                 points_incr, xp_incr = floor(points_incr), floor(xp_incr)
                 booster.left_duration -= 1
                 if booster.left_duration <= 0:

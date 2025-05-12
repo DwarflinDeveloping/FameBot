@@ -1,7 +1,7 @@
 import dataclasses
 from math import floor, ceil
-from random import randint
-from typing import Type, Self, Tuple
+from random import randint, choices
+from typing import Type, Self, Tuple, List
 
 from discord import Color
 
@@ -14,6 +14,7 @@ class Booster:
     spawn_chance: int
     color: Color
     symbol: str = ''
+    boosts_xp: bool = False
 
     def __init__(self, left_duration: int = None):
         self.left_duration = left_duration if left_duration is not None else self.get_rand_duration()
@@ -36,11 +37,24 @@ class Booster:
         yield 'left_duration', self.left_duration
 
     @classmethod
-    def from_name(cls, name: str) -> Type['Booster'] | None:
+    def from_name(cls, name: str) -> Type[Self] | None:
         for booster in boosters:
             if booster.name == name:
                 return booster
         return None
+
+    @classmethod
+    def get_random(cls, excluded: List[Type[Self]] = None) -> Type[Self]:
+        if excluded is None:
+            excluded = []
+
+        viable_boosters = [booster for booster in boosters if booster not in excluded]
+        chances = [booster.spawn_chance for booster in viable_boosters]
+        total = sum(chances)
+        if total == 0:
+            return None  # avoid division by 0
+        normalized_chances = [c / total for c in chances]
+        return choices(viable_boosters, weights=normalized_chances, k=1)[0]
 
     @classmethod
     def from_dict(cls, data: dict) -> Self:
@@ -66,6 +80,7 @@ class StarterBooster(Booster):
     boost = 3.00
     base_duration = 50
     spawn_chance = 0
+    boosts_xp = True
     color = Color.dark_red()
 
 class RoleUpBooster(Booster):
@@ -88,7 +103,7 @@ class SilverBooster(Booster):
     name = 'Silver Firepower'
     symbol = '🩶'
     boost = 0.50
-    base_duration = 35
+    base_duration = 30
     spawn_chance = 80
     color = Color.greyple()
 
@@ -159,8 +174,8 @@ class MysteryBooster(Booster):
 class DailyBooster(Booster):
     name = 'Daily Firepower'
     symbol = '1️⃣'
-    boost = 1.00
-    base_duration = 50
+    boost = 2.00
+    base_duration = 80
     spawn_chance = 0
     color = Color.red()
 
