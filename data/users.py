@@ -204,7 +204,6 @@ class FameUser:
         for _ in range(amount):
             while True:
                 quest = DailyQuest.generate(self.daily_streak, titles)
-                print(quest.name, [quest.name for quest in quests])
                 if quest.name in [quest.name for quest in quests]:
                     continue
                 else:

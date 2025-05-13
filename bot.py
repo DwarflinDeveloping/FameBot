@@ -362,7 +362,6 @@ class FameBot:
 
         quest_embed = None
         for i, quest in enumerate(list(fame_user.daily_quests)):
-            print(quest.claimed)
             if quest.id == 'island' and alpha2 in ALPHA2_ISLAND_NATIONS:
                 quest.progress += 1
 
