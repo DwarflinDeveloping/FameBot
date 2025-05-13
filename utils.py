@@ -72,6 +72,14 @@ CONTINENT_CODE_TO_NAME = {
 }
 ALPHA2_CONTINENTS = CONTINENT_CODE_TO_NAME.keys()
 
+ALPHA2_ISLAND_NATIONS = [
+    "AG", "BS", "BH", "BB", "CV", "KM", "CK", "CU", "CY", "DM", "FJ", "FI", "GD", "HT", "IS", "ID", "IE", "IL", "JM", "JP", "KI", "MV", "MH", "MU", "FM", "NR", "NZ", "NI", "PW", "PG", "PH", "WS", "ST", "SC", "SG", "SB", "LK", "VC", "KN", "LC", "TL", "TO", "TT", "TV", "GB", "VU",
+]
+
+ALPHA2_MICRO_NATIONS = [
+    "AD", "LI", "MT", "MC", "SM", "VA", "SG", "NR", "TV", "PW", "MH", "FM", "SC",
+]
+
 def points_per_capita(alpha2: str, point_count: int) -> float:
     pop = pypopulation.get_population_a2(alpha2)
     if pop is None:

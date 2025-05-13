@@ -31,7 +31,7 @@ def get_booster_embed(booster: Booster) -> Embed:
 
 def get_title_embed(title: Title, compensation: bool = False) -> Embed:
     if compensation:
-        descr1 = f'Since you already have this title, you instead get {title.compensation} xp.'
+        descr1 = f'Since you already have this title, you instead get {title.compensation}xp.'
     else:
         descr1 = f'This title will make you gain {title.xp_incr} more xp per vote permanently.'
     embed = Embed(

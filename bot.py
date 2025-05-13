@@ -12,7 +12,7 @@ from typing import Tuple, List, Dict, Any, Iterator
 
 import discord
 from discord import default_permissions, ApplicationContext, Interaction, Button, User, Member, Option, File, \
-    Embed, ButtonStyle, ui, Bot, Intents, SlashCommandGroup, TextChannel, ClientUser
+    Embed, ButtonStyle, ui, Bot, Intents, SlashCommandGroup, TextChannel, ClientUser, Role
 from discord.ext import tasks
 
 from data import load_app_data, save_game_data, flags_dir, users_dir, clear_database, USER_DATA_PRESET, \
@@ -27,7 +27,8 @@ from data.users import FameUser
 from formatting import get_base_embed, get_title_embed, get_booster_embed, get_streak_embed
 from utils import sort_dict, alpha2_to_country, country_to_alpha2, ALTERNATIVE_CNAMES, incr_symbol, \
     millify, get_rank_symbol, CONTINENT_CODE_TO_NAME, points_per_capita, country_to_continent, format_country_ranking, \
-    format_cname, POINTS, VOTES, CTYPES, ALPHA2_COUNTRIES, format_user_ranking
+    format_cname, POINTS, VOTES, CTYPES, ALPHA2_COUNTRIES, format_user_ranking, ALPHA2_ISLAND_NATIONS, \
+    ALPHA2_MICRO_NATIONS
 
 
 class FameBot:
@@ -271,7 +272,7 @@ class FameBot:
             if changes:
                 recap.save()
 
-    def spawn_titles(self, user: FameUser) -> Embed | None:
+    def get_random_title(self) -> Tuple[Role, str]:
         roles = []
         weights = []
 
@@ -288,33 +289,26 @@ class FameBot:
         roles.append(None)
         weights.append(1 - sum(weights))
 
-        result = random.choices(roles, weights=weights, k=1)[0]
+        return random.choices(roles, weights=weights, k=1)[0]
+
+    def spawn_titles(self, user: FameUser) -> Embed | None:
+        result = self.get_random_title()
         if result is None:
             return None
 
         role, rarity = result
         title = Title(role.name, rarity)
-        if not user.has_title(title.name):
-            user.add_title(title)
-            user.save()
+        compensation = title.apply(user)
+        if not compensation:
             self.role_checks.append(user.user_id)
-            compensation = False
-        else:
-            user.title_dupl_xp += title.compensation
-            compensation = True
 
         return get_title_embed(title, compensation)
 
     def spawn_boosters(self, user: FameUser, guaranteed: bool = False) -> discord.Embed | None:
         user.check_starter_booster()
-        chances = list(booster.spawn_chance for booster in boosters)
         booster_found = random.random() <= .025
         if guaranteed or booster_found:
-            total = sum(chances)
-            if total == 0:
-                return None  # avoid division by 0
-            normalized_chances = [c / total for c in chances]
-            result = random.choices(list(boosters), weights=normalized_chances, k=1)[0]
+            result = Booster.get_random()
         else:
             return None
 
@@ -365,6 +359,34 @@ class FameBot:
         fame_user.daily_votes += 1
         if booster_embed is None:
             fame_user.last_booster += 1
+
+        quest_embed = None
+        for i, quest in enumerate(list(fame_user.daily_quests)):
+            print(quest.claimed)
+            if quest.id == 'island' and alpha2 in ALPHA2_ISLAND_NATIONS:
+                quest.progress += 1
+
+            elif quest.id == 'micro' and alpha2 in ALPHA2_MICRO_NATIONS:
+                quest.progress += 1
+
+            elif quest.id == 'country' and alpha2 == quest.target_info:
+                quest.progress += 1
+
+            elif quest.id == 'continent' and country_to_continent(alpha2) == quest.target_info:
+                quest.progress += 1
+
+            elif quest.id == 'america' and country_to_continent(alpha2) in ['NA', 'SA']:
+                quest.progress += 1
+
+            if quest.finished and not quest.claimed:
+                quest.apply(fame_user)
+                quest.claimed = True
+                quest_embed = get_base_embed(
+                    user, ':pencil: Quest completed!',
+                    description=f'You have gained the following rewards:\n{quest}\n\nView your active quests using **/quests**. All quests are reset every 24 hours.'
+                )
+
+            fame_user.data['daily_quests'][i] = dict(quest)
 
         fame_user.save()
 
@@ -469,7 +491,7 @@ class FameBot:
                         break
 
         vote_args['embeds'].append(embed)
-        for embed in [booster_embed, title_embed]:
+        for embed in [booster_embed, title_embed, quest_embed]:
             if embed is not None:
                 vote_args['embeds'].append(embed)
         if role_up:
@@ -480,6 +502,22 @@ class FameBot:
         view = VoteView()
         vote_args['view'] = view
         return vote_args
+
+    def quest_args(self, ctx: ApplicationContext | Interaction):
+        fame_user = self.get_user(ctx.user.id)
+        fame_user.check_starter_booster()
+        if len(list(fame_user.data['daily_quests'])) == 0:
+            fame_user.reset_daily_quests(3, list(self.titles))
+        embed = get_base_embed(ctx.user,':pencil: Your active quests')
+
+        for quest in fame_user.daily_quests:
+            embed.add_field(name=quest.name,
+                            value=f'{quest.description}\n' +
+                                  (f'Progress: {quest.progress}/{quest.requirement}' if not quest.finished else 'Finished!') +
+                                  f'\n{quest}',
+                            inline=False)
+
+        return {'embed': embed}
 
     def booster_args(self, ctx: ApplicationContext | Interaction):
         fame_user = self.get_user(ctx.user.id)
@@ -549,7 +587,7 @@ class FameBot:
                 else:
                     txt += '???\n'
 
-            embed.add_field(name=' '.join([s.capitalize() for s in rarity.lower().split('_')]) + f' (+{RARITY_XP[rarity]} xp)',
+            embed.add_field(name=' '.join([s.capitalize() for s in rarity.lower().split('_')]) + f' (+{RARITY_XP[rarity]}xp)',
                             value=txt,
                             inline=False)
 
@@ -624,7 +662,7 @@ class FameBot:
             user.save()
 
     async def create_giveaway(self):
-        giveaway = Giveaway.generate()
+        giveaway = Giveaway.generate(list(self.titles))
         self.daily_giveaway = giveaway
 
         embed = get_base_embed(self.bot.user, ':gift: Daily giveaway',
@@ -632,6 +670,10 @@ class FameBot:
         embed.add_field(name='How to participate?',
                         value=f'Anyone who does {self.min_daily_votes} or more votes in the next 24 hours enters the giveaway.')
         await self.giveaway_channel.send(embed=embed)
+
+    async def reset_daily_quests(self, user: FameUser):
+        user.reset_daily_quests(3, list(self.titles))
+        user.save()
 
     async def resolve_giveaway(self):
         assert self.daily_giveaway is not None  # daily giveaway should always exist
@@ -808,7 +850,11 @@ class FameBot:
         await asyncio.sleep(100)
 
     def update_title_roles(self) -> None:
-        self.title_roles = {rarity: [self.bot.get_guild(self.main_guild).get_role(role) for role in roles_list] for rarity, roles_list in self.title_role_ids.items()}
+         main_guild = self.bot.get_guild(self.main_guild)
+         if not main_guild:
+             print(f'Main guild {self.main_guild} not found!')
+             exit(1)
+         self.title_roles = {rarity: [main_guild.get_role(role) for role in roles_list] for rarity, roles_list in self.title_role_ids.items()}
 
     def register_cmds(self):
         country_cmds = SlashCommandGroup('country', 'country-related commands')
@@ -863,6 +909,14 @@ class FameBot:
             await self.create_giveaway()
 
         @self.bot.slash_command(
+            name='gen_daily',
+            guild_ids=self.admin_guilds
+        )
+        @default_permissions(administrator=True)
+        async def gen_giveaway_cmd(ctx: ApplicationContext):
+            await self.reset_daily_quests(self.get_user(ctx.user.id))
+
+        @self.bot.slash_command(
             name='resolve_giveaway',
             guild_ids=self.admin_guilds
         )
@@ -894,6 +948,8 @@ class FameBot:
                 if scope == 'daily':
                     for user in self.users:
                         user.daily_votes = 0
+                        user.reset_daily_quests(3, list(self.titles))
+                        user.save()
             clear_database(**kwargs)
 
             await ctx.respond(embed=get_base_embed(ctx.author, f'{scope.capitalize()} cleared', description='Hope you know what you are doing!'), ephemeral=True)
@@ -1162,6 +1218,16 @@ class FameBot:
                 return
 
             await ctx.respond(**self.title_args(ctx))
+
+        @self.bot.slash_command(
+            name='quests',
+            description='View your current quests'
+        )
+        async def quests_cmd(ctx: ApplicationContext):
+            if not await self.check_permissions(ctx, False):
+                return
+
+            await ctx.respond(**self.quest_args(ctx))
 
         @self.bot.slash_command(
             name='help',

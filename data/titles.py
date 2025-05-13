@@ -3,7 +3,7 @@ from typing import Literal
 
 from discord import Color
 
-RARITIES = Literal['COMMON', 'RARE', 'SUPER_RARE', 'MYTHIC', 'LEGENDARY', 'SPECIAL']
+RARITIES = Literal['COMMON', 'RARE', 'SUPER_RARE', 'MYTHIC', 'LEGENDARY', 'DIVINE', 'SPECIAL']
 
 RARITY_COLORS = {
     'COMMON': Color.greyple(),
@@ -11,6 +11,7 @@ RARITY_COLORS = {
     'SUPER_RARE': Color.dark_blue(),
     'MYTHIC': Color.fuchsia(),
     'LEGENDARY': Color.gold(),
+    'DIVINE': Color.dark_gold(),
     'SPECIAL': Color.dark_purple()
 }
 
@@ -20,6 +21,7 @@ RARITY_XP = {
     'SUPER_RARE': 3,
     'MYTHIC': 4,
     'LEGENDARY': 5,
+    'DIVINE': 8,
     'SPECIAL': 8
 }
 
@@ -29,6 +31,7 @@ RARITY_CHANCES = {
     'SUPER_RARE': .0025,
     'MYTHIC': .0010,
     'LEGENDARY': .0005,
+    'DIVINE': .0002,
     'SPECIAL': 0
 }
 
@@ -64,3 +67,12 @@ class Title:
     @property
     def spawn_chance(self) -> float:
         return RARITY_CHANCES.get(self.rarity, 0)
+
+    def apply(self, user) -> bool:
+        if not user.has_title(self.name):
+            user.add_title(self)
+            user.save()
+            return False
+        else:
+            user.title_dupl_xp += self.compensation
+            return True

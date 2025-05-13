@@ -11,6 +11,7 @@ from discord import User
 
 from data import users_dir, USER_DATA_PRESET, PV_PRESET
 from data.boosters import StarterBooster, Booster
+from data.giveaways import DailyQuest
 from data.titles import Title
 
 
@@ -187,10 +188,29 @@ class FameUser:
         for title_data in self.data['titles']:
             yield Title(title_data['name'], title_data['rarity'])
 
+    @property
+    def daily_quests(self) -> Iterator[DailyQuest]:
+        for quest_data in self.data['daily_quests']:
+            yield DailyQuest.from_dict(quest_data)
+
     def add_booster(self, booster: Type[Booster], count: int = 1):
         if booster.name not in self.data['boosters']:
             self.data['boosters'][booster.name] = 0
         self.data['boosters'][booster.name] += count
+
+    def reset_daily_quests(self, amount: int, titles: List[Title]):
+        self.data['daily_quests'] = []
+        quests = []
+        for _ in range(amount):
+            while True:
+                quest = DailyQuest.generate(self.daily_streak, titles)
+                print(quest.name, [quest.name for quest in quests])
+                if quest.name in [quest.name for quest in quests]:
+                    continue
+                else:
+                    quests.append(quest)
+                    break
+        self.data['daily_quests'] = [dict(quest) for quest in quests]
 
     def has_title(self, title_name: str):
         return title_name in [title.name for title in self.titles]
