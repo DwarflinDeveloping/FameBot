@@ -670,10 +670,6 @@ class FameBot:
                         value=f'Anyone who does {self.min_daily_votes} or more votes in the next 24 hours enters the giveaway.')
         await self.giveaway_channel.send(embed=embed)
 
-    async def reset_daily_quests(self, user: FameUser):
-        user.reset_daily_quests(3, list(self.titles))
-        user.save()
-
     async def resolve_giveaway(self):
         assert self.daily_giveaway is not None  # daily giveaway should always exist
         participating = [user for user in self.users if user.daily_votes >= self.min_daily_votes]
@@ -913,7 +909,11 @@ class FameBot:
         )
         @default_permissions(administrator=True)
         async def gen_giveaway_cmd(ctx: ApplicationContext):
-            await self.reset_daily_quests(self.get_user(ctx.user.id))
+            if not await self.check_permissions(ctx, True):
+                return
+
+            for user in self.users:
+                user.reset_daily_quests(3, list(self.titles))
 
         @self.bot.slash_command(
             name='resolve_giveaway',
@@ -921,6 +921,9 @@ class FameBot:
         )
         @default_permissions(administrator=True)
         async def resolve_giveaway_cmd(ctx: ApplicationContext):
+            if not await self.check_permissions(ctx, True):
+                return
+
             await self.resolve_giveaway()
 
         @self.bot.slash_command(
