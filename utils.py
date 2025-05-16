@@ -70,18 +70,34 @@ CONTINENT_CODE_TO_NAME = {
     'AF': 'Africa',
     'AN': 'Antarctic Territories'
 }
-ALPHA2_CONTINENTS = CONTINENT_CODE_TO_NAME.keys()
+ALPHA2_CONTINENTS = list(CONTINENT_CODE_TO_NAME.keys())
 
 ALPHA2_ISLAND_NATIONS = [
-    "AG", "BS", "BH", "BB", "CV", "KM", "CK", "CU", "CY", "DM", "FJ", "FI", "GD", "HT", "IS", "ID", "IE", "IL", "JM", "JP", "KI", "MV", "MH", "MU", "FM", "NR", "NZ", "NI", "PW", "PG", "PH", "WS", "ST", "SC", "SG", "SB", "LK", "VC", "KN", "LC", "TL", "TO", "TT", "TV", "GB", "VU",
+    'AI', 'AS', 'AG', 'AU', 'AX', 'AW', 'BB', 'BM', 'BN', 'BS', 'CC', 'CK', 'CV', 'CX', 'CY', 'DM', 'DO', 'FJ', 'FK', 'FM', 'GD', 'GL', 'GS', 'GU', 'HK', 'HM', 'ID', 'IE', 'IM', 'IS', 'IT', 'JM', 'JP', 'KI', 'KN', 'KR', 'LC', 'LK', 'MH', 'ML', 'MM', 'MP', 'MQ', 'MS', 'MT', 'MU', 'MV', 'NC', 'NF', 'NR', 'NU', 'NZ', 'PG', 'PH', 'PM', 'PN', 'PR', 'PW', 'RE', 'SB', 'SC', 'SG', 'SH', 'SJ', 'SL', 'SM', 'ST', 'SX', 'TC', 'TF', 'TH', 'TK', 'TL', 'TO', 'TT', 'TV', 'TW', 'UM', 'VC', 'VG', 'VI', 'VU', 'WF', 'WS'
 ]
 
 ALPHA2_MICRO_NATIONS = [
-    "AD", "LI", "MT", "MC", "SM", "VA", "SG", "NR", "TV", "PW", "MH", "FM", "SC",
+    'AD', 'AG', 'FM', 'GD', 'KN', 'LC', 'LI', 'LU', 'MC', 'MH', 'MT', 'NR', 'SC', 'SM', 'ST', 'TV', 'VA', 'VC', 'WS'
 ]
 
 ALPHA2_LANDLOCKED = [
-    "BI", "BW", "BF", "CF", "TD", "ET", "LS", "MW", "ML", "NE", "RW", "SS", "SZ", "UG", "ZM", "ZW", "AD", "AT", "BY", "CZ", "HU", "LI", "LU", "MD", "MK", "RS", "SK", "CH", "SM", "VA", "AF", "AM", "AZ", "BT", "KZ", "KG", "LA", "MN", "NP", "TJ", "TM", "UZ", "BO", "PY", "XK",
+    'BI', 'BW', 'BF', 'CF', 'TD', 'ET', 'LS', 'MW', 'ML', 'NE', 'RW', 'SS', 'SZ', 'UG', 'ZM', 'ZW', 'AD', 'AT', 'BY', 'CZ', 'HU', 'LI', 'LU', 'MD', 'MK', 'RS', 'SK', 'CH', 'SM', 'VA', 'AF', 'AM', 'AZ', 'BT', 'KZ', 'KG', 'LA', 'MN', 'NP', 'TJ', 'TM', 'UZ', 'BO', 'PY', 'XK',
+]
+
+POLAR_COUNTRIES = [
+    'AQ', 'TF', 'GS', 'RU', 'NO', 'IS', 'FI', 'SE', 'GL', 'US', 'CA', 'DK'
+]
+
+EU_COUNTRIES = [
+    'AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR', 'DE', 'GR', 'HU', 'IE', 'IT', 'LV', 'LT', 'LU', 'MT', 'NL', 'PL', 'PT', 'RO', 'SK', 'SI', 'ES', 'SE'
+]
+
+WAR_COUNTRIES = [
+    'UA', 'PS', 'MM', 'SD', 'ET', 'SO', 'SY', 'CD', 'ML', 'BF', 'NG', 'YE', 'PK', 'HT', 'RU', 'IL'
+]
+
+DESERT_COUNTRIES = [
+    'SA', 'QA', 'AE', 'OM', 'KW', 'BH', 'LY', 'EG', 'DZ', 'MR', 'NE', 'TD', 'SD', 'YE', 'IR', 'TM', 'UZ', 'KZ', 'AU', 'NA', 'BW',
 ]
 
 def points_per_capita(alpha2: str, point_count: int) -> float:

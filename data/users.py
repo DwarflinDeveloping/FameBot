@@ -5,7 +5,7 @@ from copy import deepcopy
 from math import floor
 from pathlib import Path
 from random import sample
-from time import time, sleep
+from time import time
 from typing import Self, List, Any, Iterator, Tuple, Dict, Type
 
 from discord import User
@@ -13,8 +13,9 @@ from pandas.core.interchange.dataframe_protocol import DataFrame
 
 from data import users_dir, USER_DATA_PRESET, PV_PRESET
 from data.boosters import StarterBooster, Booster
-from data.giveaways import DailyQuest, daily_quests
+from data.prices.quests import DailyQuest, daily_quests, Quest
 from data.titles import Title
+from data.trivia import TriviaManager
 
 
 @dataclasses.dataclass
@@ -203,14 +204,26 @@ class FameUser:
         for quest_data in self.data['daily_quests']:
             yield DailyQuest.from_dict(quest_data)
 
+    @property
+    def completed_quests(self) -> Dict[str, int]:
+        return self.data['completed_quests']
+
+    def add_quest_completion(self, quest_id: str) -> None:
+        if quest_id not in self.data['completed_quests']:
+            self.data['completed_quests'][quest_id] = 0
+        self.data['completed_quests'][quest_id] += 1
+
+    def update_quest(self, quest: Quest, pos: int) -> None:
+        self.data['daily_quests'][pos] = dict(quest)
+
     def add_booster(self, booster: Type[Booster], count: int = 1):
         if booster.name not in self.data['boosters']:
             self.data['boosters'][booster.name] = 0
         self.data['boosters'][booster.name] += count
 
-    def reset_daily_quests(self, trivia_df: DataFrame, amount: int, titles: List[Title]):
+    def reset_daily_quests(self, trivia: TriviaManager, amount: int, titles: List[Title]):
         self.data['daily_quests'] = [
-            dict(DailyQuest.generate(trivia_df, quest_type, self.daily_streak, titles))
+            dict(DailyQuest.generate(trivia, quest_type, self.daily_streak, titles))
             for quest_type in sample(daily_quests, amount)
         ]
 

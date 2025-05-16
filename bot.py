@@ -18,17 +18,16 @@ from discord.ext import tasks
 from data import load_app_data, save_game_data, flags_dir, users_dir, clear_database, USER_DATA_PRESET, \
     PV_PRESET, make_dirs, load_game_data, save_app_data
 from data.boosters import RoleUpBooster, Booster, boosters
-from data.giveaways import Giveaway, StreakReward
+from data.prices.giveaways import Giveaway, StreakReward
 from data.recaps import save_data, FameRecap
 from data.resources import get_banner_path, get_banner, get_flag
 from data.titles import RARITY_CHANCES, Title, RARITY_XP
-from data.trivia import get_mappings, load_trivia
+from data.trivia import TriviaManager
 from data.users import FameUser
 from formatting import get_base_embed, get_title_embed, get_booster_embed, get_streak_embed
 from utils import sort_dict, alpha2_to_country, country_to_alpha2, ALTERNATIVE_CNAMES, incr_symbol, \
     millify, get_rank_symbol, CONTINENT_CODE_TO_NAME, points_per_capita, country_to_continent, format_country_ranking, \
-    format_cname, POINTS, VOTES, CTYPES, ALPHA2_COUNTRIES, format_user_ranking, ALPHA2_ISLAND_NATIONS, \
-    ALPHA2_MICRO_NATIONS, ALPHA2_LANDLOCKED
+    format_cname, POINTS, VOTES, CTYPES, ALPHA2_COUNTRIES, format_user_ranking
 
 
 class FameBot:
@@ -54,7 +53,7 @@ class FameBot:
         self.title_roles = None
         self.app_data = load_app_data()
         self.game_data = load_game_data()
-        self.trivia_df = load_trivia()
+        self.trivia = TriviaManager()
         self.role_checks: List[int] = []
         self.loaded_users: Dict[int, FameUser] = {}
         self.cached_users: Dict[int, discord.User] = {}
@@ -227,7 +226,7 @@ class FameBot:
         return sort_dict(point_values), sort_dict(vote_values)
 
     def get_top_trivia(self, scope: str, category: str) -> Tuple[Dict[str, int], Dict[str, int]]:
-        mappings = get_mappings(self.trivia_df, category)
+        mappings = self.trivia.get_mappings(category)
         recap = self.get_recap(scope)
 
         point_values, vote_values = dict(), dict()
@@ -362,24 +361,24 @@ class FameBot:
 
         quest_embed = None
         for i, quest in enumerate(list(fame_user.daily_quests)):
-            if quest.id == 'island' and alpha2 in ALPHA2_ISLAND_NATIONS or \
-                quest.id == 'landlocked' and alpha2 in ALPHA2_LANDLOCKED or \
-                quest.id == 'micro' and alpha2 in ALPHA2_MICRO_NATIONS or \
-                quest.id == 'country' and alpha2 == quest.target or \
-                quest.id == 'continent' and country_to_continent(alpha2) == quest.target or \
-                quest.id == 'americas' and country_to_continent(alpha2) in ['NA', 'SA'] or \
-                quest.id == 'religion' and get_mappings(self.trivia_df, 'ReligionPrimary').get(alpha2, '') == quest.target:
+            possible_countries = list(quest.get_countries(self.trivia))
+            update = False
+            if alpha2 in possible_countries:
                 quest.progress += 1
+                update = True
 
             if quest.finished and not quest.claimed:
                 quest.apply(fame_user)
                 quest.claimed = True
+                update = True
                 quest_embed = get_base_embed(
                     user, ':pencil: Quest completed!',
-                    description=f'You have gained the following rewards:\n{quest}\n\nView your active quests using **/quests**. All quests are reset every 24 hours.'
+                    description=f'You have gained the following rewards:\n{quest}\n\n'
+                                'View your active quests using **/quests**. All quests are reset every 24 hours.'
                 )
 
-            fame_user.data['daily_quests'][i] = dict(quest)
+            if update:
+                fame_user.update_quest(quest, i)
 
         fame_user.save()
 
@@ -500,7 +499,7 @@ class FameBot:
         fame_user = self.get_user(ctx.user.id)
         fame_user.check_starter_booster()
         if len(list(fame_user.data['daily_quests'])) == 0:
-            fame_user.reset_daily_quests(self.trivia_df, 5, list(self.titles))
+            fame_user.reset_daily_quests(self.trivia, 5, list(self.titles))
         embed = get_base_embed(ctx.user,':pencil: Your active quests')
 
         for quest in fame_user.daily_quests:
@@ -510,7 +509,28 @@ class FameBot:
                                   f'\n{quest}',
                             inline=False)
 
-        return {'embed': embed}
+        class DetailView(ui.View):
+            @staticmethod
+            async def check_user(interaction: Interaction):
+                if interaction.user.id != ctx.user.id:
+                    await interaction.respond(embed=get_base_embed(ctx.user, f'This is {ctx.user.name}\'s quest menu! Make your own one using /cvote', error=True), ephemeral=True)
+                    return False
+                return True
+
+            @ui.button(label='Details', style=ButtonStyle.primary, custom_id='details')
+            async def details_callback(self2, button: Button, interaction: Interaction):
+                if not await self2.check_user(interaction) or not await self.check_permissions(interaction, False):
+                    return
+
+                embed2 = get_base_embed(ctx.user,':pencil2: Quest details')
+                for quest2 in fame_user.daily_quests:
+                    possible_countries = list(quest2.get_countries(self.trivia))
+                    embed2.add_field(name=quest2.formatted_name,
+                                     value=', '.join(possible_countries) if len(possible_countries) >= 0 else '',
+                                     inline=False)
+                await interaction.respond(embed=embed2)
+
+        return {'embed': embed, 'view': DetailView()}
 
     def booster_args(self, ctx: ApplicationContext | Interaction):
         fame_user = self.get_user(ctx.user.id)
@@ -907,7 +927,7 @@ class FameBot:
                 return
 
             for user in self.users:
-                user.reset_daily_quests(self.trivia_df, 5, list(self.titles))
+                user.reset_daily_quests(self.trivia, 5, list(self.titles))
 
         @self.bot.slash_command(
             name='resolve_giveaway',
@@ -944,7 +964,7 @@ class FameBot:
                 if scope == 'daily':
                     for user in self.users:
                         user.daily_votes = 0
-                        user.reset_daily_quests(self.trivia_df, 5, list(self.titles))
+                        user.reset_daily_quests(self.trivia, 5, list(self.titles))
                         user.save()
             clear_database(**kwargs)
 
@@ -1264,6 +1284,7 @@ class FameBot:
         @self.bot.listen(once=True)
         async def on_ready():
             self.update_title_roles()
+            print('Bot ready')
 
     async def fetch_votes(self, channel: TextChannel):
         Path('users2').mkdir(exist_ok=True)

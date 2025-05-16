@@ -3,7 +3,7 @@ import datetime
 from discord import Embed, User, Colour
 
 from data.boosters import Booster
-from data.giveaways import StreakReward
+from data.prices.giveaways import StreakReward
 from data.titles import Title
 
 

@@ -80,6 +80,7 @@ USER_DATA_PRESET = {
     'titles': [],
     'active_booster': None,
     'daily_quests': [],
+    'completed_quests': {},
     'last_booster': 0
 }
 
