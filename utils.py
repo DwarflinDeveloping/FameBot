@@ -13,7 +13,7 @@ def sort_dict(inp_dict: dict) -> dict:
     return dict(sorted(inp_dict.items(), key=lambda item: item[1], reverse=True))
 
 ALPHA2_TO_COUNTRY = {country.alpha_2: country.name for country in pycountry.countries}
-ALPHA2_COUNTRIES, CNAMES = ALPHA2_TO_COUNTRY.keys(), ALPHA2_TO_COUNTRY.values()
+ALPHA2_COUNTRIES, CNAMES = list(ALPHA2_TO_COUNTRY.keys()), list(ALPHA2_TO_COUNTRY.values())
 
 ALTERNATIVE_CNAMES = {
     'Turkey': 'TR',
@@ -78,6 +78,10 @@ ALPHA2_ISLAND_NATIONS = [
 
 ALPHA2_MICRO_NATIONS = [
     "AD", "LI", "MT", "MC", "SM", "VA", "SG", "NR", "TV", "PW", "MH", "FM", "SC",
+]
+
+ALPHA2_LANDLOCKED = [
+    "BI", "BW", "BF", "CF", "TD", "ET", "LS", "MW", "ML", "NE", "RW", "SS", "SZ", "UG", "ZM", "ZW", "AD", "AT", "BY", "CZ", "HU", "LI", "LU", "MD", "MK", "RS", "SK", "CH", "SM", "VA", "AF", "AM", "AZ", "BT", "KZ", "KG", "LA", "MN", "NP", "TJ", "TM", "UZ", "BO", "PY", "XK",
 ]
 
 def points_per_capita(alpha2: str, point_count: int) -> float:

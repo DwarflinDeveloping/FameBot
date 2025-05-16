@@ -28,7 +28,7 @@ from formatting import get_base_embed, get_title_embed, get_booster_embed, get_s
 from utils import sort_dict, alpha2_to_country, country_to_alpha2, ALTERNATIVE_CNAMES, incr_symbol, \
     millify, get_rank_symbol, CONTINENT_CODE_TO_NAME, points_per_capita, country_to_continent, format_country_ranking, \
     format_cname, POINTS, VOTES, CTYPES, ALPHA2_COUNTRIES, format_user_ranking, ALPHA2_ISLAND_NATIONS, \
-    ALPHA2_MICRO_NATIONS
+    ALPHA2_MICRO_NATIONS, ALPHA2_LANDLOCKED
 
 
 class FameBot:
@@ -362,19 +362,13 @@ class FameBot:
 
         quest_embed = None
         for i, quest in enumerate(list(fame_user.daily_quests)):
-            if quest.id == 'island' and alpha2 in ALPHA2_ISLAND_NATIONS:
-                quest.progress += 1
-
-            elif quest.id == 'micro' and alpha2 in ALPHA2_MICRO_NATIONS:
-                quest.progress += 1
-
-            elif quest.id == 'country' and alpha2 == quest.target_info:
-                quest.progress += 1
-
-            elif quest.id == 'continent' and country_to_continent(alpha2) == quest.target_info:
-                quest.progress += 1
-
-            elif quest.id == 'america' and country_to_continent(alpha2) in ['NA', 'SA']:
+            if quest.id == 'island' and alpha2 in ALPHA2_ISLAND_NATIONS or \
+                quest.id == 'landlocked' and alpha2 in ALPHA2_LANDLOCKED or \
+                quest.id == 'micro' and alpha2 in ALPHA2_MICRO_NATIONS or \
+                quest.id == 'country' and alpha2 == quest.target or \
+                quest.id == 'continent' and country_to_continent(alpha2) == quest.target or \
+                quest.id == 'americas' and country_to_continent(alpha2) in ['NA', 'SA'] or \
+                quest.id == 'religion' and get_mappings(self.trivia_df, 'ReligionPrimary').get(alpha2, '') == quest.target:
                 quest.progress += 1
 
             if quest.finished and not quest.claimed:
@@ -506,12 +500,12 @@ class FameBot:
         fame_user = self.get_user(ctx.user.id)
         fame_user.check_starter_booster()
         if len(list(fame_user.data['daily_quests'])) == 0:
-            fame_user.reset_daily_quests(3, list(self.titles))
+            fame_user.reset_daily_quests(self.trivia_df, 5, list(self.titles))
         embed = get_base_embed(ctx.user,':pencil: Your active quests')
 
         for quest in fame_user.daily_quests:
-            embed.add_field(name=quest.name,
-                            value=f'{quest.description}\n' +
+            embed.add_field(name=quest.formatted_name,
+                            value=f'{quest.formatted_description}\n' +
                                   (f'Progress: {quest.progress}/{quest.requirement}' if not quest.finished else 'Finished!') +
                                   f'\n{quest}',
                             inline=False)
@@ -559,7 +553,7 @@ class FameBot:
                     fame_user.activate_booster(boo)
                     emb = get_base_embed(
                         interaction.user,
-                        title=f'{boo.symbol} You have activated a {boo.name}!',
+                        title=f'{boo.base_symbol} You have activated a {boo.name}!',
                         description=f'Your points and xp gains will increase by {boo.format_boost()} for the next {boo.left_duration} votes.',
                         colour=boo.color
                     )
@@ -913,7 +907,7 @@ class FameBot:
                 return
 
             for user in self.users:
-                user.reset_daily_quests(3, list(self.titles))
+                user.reset_daily_quests(self.trivia_df, 5, list(self.titles))
 
         @self.bot.slash_command(
             name='resolve_giveaway',
@@ -950,7 +944,7 @@ class FameBot:
                 if scope == 'daily':
                     for user in self.users:
                         user.daily_votes = 0
-                        user.reset_daily_quests(3, list(self.titles))
+                        user.reset_daily_quests(self.trivia_df, 5, list(self.titles))
                         user.save()
             clear_database(**kwargs)
 

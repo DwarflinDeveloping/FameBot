@@ -4,14 +4,16 @@ import json
 from copy import deepcopy
 from math import floor
 from pathlib import Path
-from time import time
+from random import sample
+from time import time, sleep
 from typing import Self, List, Any, Iterator, Tuple, Dict, Type
 
 from discord import User
+from pandas.core.interchange.dataframe_protocol import DataFrame
 
 from data import users_dir, USER_DATA_PRESET, PV_PRESET
 from data.boosters import StarterBooster, Booster
-from data.giveaways import DailyQuest
+from data.giveaways import DailyQuest, daily_quests
 from data.titles import Title
 
 
@@ -143,6 +145,14 @@ class FameUser:
         self.data['leveling']['giveaway_xp'] = value
 
     @property
+    def quest_xp(self) -> int:
+        return self.data['leveling']['quest_xp']
+
+    @quest_xp.setter
+    def quest_xp(self, value: int) -> None:
+        self.data['leveling']['quest_xp'] = value
+
+    @property
     def gift_xp(self) -> int:
         return self.data['leveling']['gift_xp']
 
@@ -198,18 +208,11 @@ class FameUser:
             self.data['boosters'][booster.name] = 0
         self.data['boosters'][booster.name] += count
 
-    def reset_daily_quests(self, amount: int, titles: List[Title]):
-        self.data['daily_quests'] = []
-        quests = []
-        for _ in range(amount):
-            while True:
-                quest = DailyQuest.generate(self.daily_streak, titles)
-                if quest.name in [quest.name for quest in quests]:
-                    continue
-                else:
-                    quests.append(quest)
-                    break
-        self.data['daily_quests'] = [dict(quest) for quest in quests]
+    def reset_daily_quests(self, trivia_df: DataFrame, amount: int, titles: List[Title]):
+        self.data['daily_quests'] = [
+            dict(DailyQuest.generate(trivia_df, quest_type, self.daily_streak, titles))
+            for quest_type in sample(daily_quests, amount)
+        ]
 
     def has_title(self, title_name: str):
         return title_name in [title.name for title in self.titles]
@@ -320,7 +323,7 @@ class FameUser:
 
     @property
     def total_xp(self):
-        return self.start_xp + self.vote_xp + self.giveaway_xp + self.gift_xp + self.title_dupl_xp + self.additional_xp
+        return self.start_xp + self.vote_xp + self.giveaway_xp + self.quest_xp + self.gift_xp + self.title_dupl_xp + self.additional_xp
 
     @property
     def next_level_xp(self) -> float:

@@ -7,6 +7,7 @@ from pandas import DataFrame, read_csv
 from data import trivia_path
 
 
+@lru_cache()
 def load_trivia() -> DataFrame:
     if not trivia_path.is_file():
         print('Downloading trivia file...')
