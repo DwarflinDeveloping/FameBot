@@ -62,7 +62,7 @@ class Title:
 
     @property
     def compensation(self) -> int:
-        return self.xp_incr * 100
+        return self.xp_incr * 200
 
     @property
     def spawn_chance(self) -> float:
