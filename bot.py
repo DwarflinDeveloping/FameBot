@@ -591,7 +591,6 @@ class FameBot:
             descr = 'You don\'t have any titles yet! Keep voting to gain some.'
         embed = get_base_embed(ctx.user, 'Your titles', description=descr)
 
-        print(list(self.title_roles.items()))
         for rarity, role_list in self.title_roles.items():
             txt = ''
             for role in role_list:
