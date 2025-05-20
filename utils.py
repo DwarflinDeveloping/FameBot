@@ -73,7 +73,7 @@ CONTINENT_CODE_TO_NAME = {
 ALPHA2_CONTINENTS = list(CONTINENT_CODE_TO_NAME.keys())
 
 ALPHA2_ISLAND_NATIONS = [
-    'AI', 'AS', 'AG', 'AU', 'AX', 'AW', 'BB', 'BM', 'BN', 'BS', 'CC', 'CK', 'CV', 'CX', 'CY', 'DM', 'DO', 'FJ', 'FK', 'FM', 'GD', 'GL', 'GS', 'GU', 'HK', 'HM', 'ID', 'IE', 'IM', 'IS', 'IT', 'JM', 'JP', 'KI', 'KN', 'KR', 'LC', 'LK', 'MH', 'ML', 'MM', 'MP', 'MQ', 'MS', 'MT', 'MU', 'MV', 'NC', 'NF', 'NR', 'NU', 'NZ', 'PG', 'PH', 'PM', 'PN', 'PR', 'PW', 'RE', 'SB', 'SC', 'SG', 'SH', 'SJ', 'SL', 'SM', 'ST', 'SX', 'TC', 'TF', 'TH', 'TK', 'TL', 'TO', 'TT', 'TV', 'TW', 'UM', 'VC', 'VG', 'VI', 'VU', 'WF', 'WS'
+    'AI', 'AS', 'AG', 'AU', 'AX', 'AW', 'BB', 'BM', 'BN', 'BS', 'CC', 'CK', 'CV', 'CX', 'CY', 'DM', 'DO', 'FJ', 'FK', 'FM', 'FO', 'GD', 'GL', 'GS', 'GU', 'HK', 'HM', 'ID', 'IE', 'IM', 'IS', 'IT', 'JM', 'JP', 'KI', 'KN', 'KR', 'LC', 'LK', 'MH', 'ML', 'MM', 'MP', 'MQ', 'MS', 'MT', 'MU', 'MV', 'NC', 'NF', 'NR', 'NU', 'NZ', 'PG', 'PH', 'PM', 'PN', 'PR', 'PW', 'RE', 'SB', 'SC', 'SG', 'SH', 'SJ', 'SL', 'SM', 'ST', 'SX', 'TC', 'TF', 'TH', 'TK', 'TL', 'TO', 'TT', 'TV', 'TW', 'UM', 'VC', 'VG', 'VI', 'VU', 'WF', 'WS'
 ]
 
 ALPHA2_MICRO_NATIONS = [
