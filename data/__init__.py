@@ -81,6 +81,7 @@ USER_DATA_PRESET = {
     'active_booster': None,
     'daily_quests': [],
     'completed_quests': {},
+    'activated_boosters': {},
     'last_booster': 0
 }
 

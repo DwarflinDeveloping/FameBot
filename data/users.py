@@ -80,6 +80,14 @@ class FameUser:
         if self.data['active_booster']:
             self.data['active_booster']['name'] = update_legacy_booster(self.data['active_booster']['name'])
 
+        title_names = []
+        for n, title in enumerate(self.data['titles']):
+            if title['name'] in title_names:
+                del self.data['titles'][n]
+            else:
+                title_names.append(title['name'])
+
+
     @property
     def total_votes(self) -> int:
         return self.data['total']['votes']
@@ -253,6 +261,11 @@ class FameUser:
         self.data['boosters'][booster.name] -= 1
         if self.data['boosters'][booster.name] == 0:
             del self.data['boosters'][booster.name]
+
+        if booster.name not in self.data['activated_boosters']:
+            self.data['boosters'][booster.name] = 0
+        self.data['boosters'][booster.name] += 1
+
         self.active_booster = booster
 
     @property

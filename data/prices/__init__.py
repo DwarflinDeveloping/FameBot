@@ -87,7 +87,10 @@ class TitlePrice(GiveawayPrice):
         yield 'title', dict(self.title)
 
     def apply(self, user, *_) -> None:
-        user.add_title(self.title)
+        if not user.has_title(self.title.name):
+            user.add_title(self.title)
+        else:
+            user.title_dupl_xp += self.title.compensation
 
     @classmethod
     def from_dict(cls, data: dict) -> Self:
