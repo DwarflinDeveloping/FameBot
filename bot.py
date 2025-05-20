@@ -573,7 +573,7 @@ class FameBot:
                     fame_user.activate_booster(boo)
                     emb = get_base_embed(
                         interaction.user,
-                        title=f'{boo.base_symbol} You have activated a {boo.name}!',
+                        title=f'{boo.symbol} You have activated a {boo.name}!',
                         description=f'Your points and xp gains will increase by {boo.format_boost()} for the next {boo.left_duration} votes.',
                         colour=boo.color
                     )
@@ -763,11 +763,11 @@ class FameBot:
 
                 if topic == 'users':
                     user_id = int(item_indicator)
-                    user = self.get_user(user_id)
+                    fame_user = self.get_user(user_id)
                     dc_user = await self.fetch_dc_user(user_id)
                     if count <= 1:
                         continue
-                    ranking_str = format_user_ranking(dc_user.display_name, rank, round(user.leveling, 2), ctype)
+                    ranking_str = format_user_ranking(dc_user.display_name, rank, round(fame_user.leveling, 2), ctype)
 
                 else:
                     dpos = None
