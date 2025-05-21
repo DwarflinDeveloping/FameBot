@@ -182,3 +182,6 @@ class DailyBooster(Booster):
 
 boosters = (StarterBooster, RoleUpBooster, BronzeBooster, SilverBooster, GoldBooster, DiamondBooster, MythicBooster,
             LegendaryBooster, MastersBooster, ProBooster, SeasonalBooster, MysteryBooster, DailyBooster)
+
+booster_name_to_cls = {b.name: b for b in boosters}
+booster_names = list(booster_name_to_cls.keys())

@@ -263,8 +263,8 @@ class FameUser:
             del self.data['boosters'][booster.name]
 
         if booster.name not in self.data['activated_boosters']:
-            self.data['boosters'][booster.name] = 0
-        self.data['boosters'][booster.name] += 1
+            self.data['activated_boosters'][booster.name] = 0
+        self.data['activated_boosters'][booster.name] += 1
 
         self.active_booster = booster
 

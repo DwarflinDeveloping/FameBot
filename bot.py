@@ -8,7 +8,7 @@ from functools import cached_property
 from math import ceil, floor
 from pathlib import Path
 from time import time
-from typing import Tuple, List, Dict, Any, Iterator
+from typing import Tuple, List, Dict, Any, Iterator, Literal, Optional
 
 import discord
 from discord import default_permissions, ApplicationContext, Interaction, Button, User, Member, Option, File, \
@@ -17,7 +17,7 @@ from discord.ext import tasks
 
 from data import load_app_data, save_game_data, flags_dir, users_dir, clear_database, USER_DATA_PRESET, \
     PV_PRESET, make_dirs, load_game_data, save_app_data
-from data.boosters import RoleUpBooster, Booster, boosters
+from data.boosters import RoleUpBooster, Booster, boosters, booster_names, booster_name_to_cls
 from data.prices.giveaways import Giveaway, StreakReward
 from data.recaps import save_data, FameRecap
 from data.resources import get_banner_path, get_banner, get_flag
@@ -867,6 +867,7 @@ class FameBot:
 
     def register_cmds(self):
         country_cmds = SlashCommandGroup('country', 'country-related commands')
+        gift_cmds = SlashCommandGroup('gift', 'make gifts to other users')
         top_cmds = SlashCommandGroup('top', 'leaderboards')
         user_cmds = SlashCommandGroup('user', 'user-related commands')
 
@@ -908,6 +909,46 @@ class FameBot:
             await asyncio.sleep(60)
             vote_args['view'].disable_all_items()
             await ctx.edit(view=vote_args['view'])
+
+        @gift_cmds.command(
+            name='xp',
+            description='Gift xp to another user'
+        )
+        async def gift_xp_cmd(ctx: ApplicationContext, recipient: User, amount: Option(int)):
+            if not await self.check_permissions(ctx, True):
+                return
+
+            from_user, to_user = self.get_user(ctx.user.id), self.get_user(recipient.id)
+            """if (from_user.total_xp - amount - 100) <= 0:
+                embed = get_base_embed(
+                    ctx.author, 'Not enough XP',
+                    error=True)
+                await ctx.respond(embed=embed, ephemeral=True)
+                return"""
+
+            # from_user.gift_xp -= amount
+            to_user.gift_xp += amount
+
+            await ctx.respond(embed=get_base_embed(ctx.author, f'Gifted {amount}xp to {recipient.display_name}'))
+
+        @gift_cmds.command(
+            name='booster',
+            description='Gift firepowers to another user'
+        )
+        async def gift_xp_cmd(ctx: ApplicationContext, recipient: User,
+                              booster: Option(str, choices=booster_names), amount: Option(int)):
+            if not await self.check_permissions(ctx, True):
+                return
+
+            from_user, to_user = self.get_user(ctx.user.id), self.get_user(recipient.id)
+            booster_cls = booster_name_to_cls.get(booster, None)
+            if booster_cls is None:
+                raise AssertionError
+
+            # from_user.add_booster(booster_cls, -amount)
+            to_user.add_booster(booster_cls, amount)
+
+            await ctx.respond(embed=get_base_embed(ctx.author, f'Gifted {amount}x {booster} to {recipient.display_name}'))
 
         @self.bot.slash_command(
             name='gen_giveaway',
@@ -1185,7 +1226,7 @@ class FameBot:
             name='info',
             description='Displays information on a user'
         )
-        async def uinfo_cmd(ctx: ApplicationContext, user: User):
+        async def uinfo_cmd(ctx: ApplicationContext, user: Option(User)):
             if not await self.check_permissions(ctx, False):
                 return
 
@@ -1204,6 +1245,18 @@ class FameBot:
                             inline=False)
             embed.set_thumbnail(url=user.avatar.url if user.avatar else user.default_avatar.url)
             await ctx.respond(embed=embed)
+
+        @user_cmds.command(
+            name='data',
+            description='Displays data on a user (admin only)'
+        )
+        async def udata_cmd(ctx: ApplicationContext, user: Option(User), key: Optional[str]):
+            if not await self.check_permissions(ctx, True):
+                return
+
+            fame_user = self.get_user(user.id)
+            data = fame_user.data if not key else fame_user.data[key]
+            await ctx.respond(embed=get_base_embed(ctx.author, title=f'{user.name}\'s data', description=f'```{data}```'))
 
         @self.bot.slash_command(
             name='me',
@@ -1278,6 +1331,7 @@ class FameBot:
             await ctx.respond('analysis finished!', ephemeral=True)
 
         self.bot.add_application_command(country_cmds)
+        self.bot.add_application_command(gift_cmds)
         self.bot.add_application_command(top_cmds)
         self.bot.add_application_command(user_cmds)
 
