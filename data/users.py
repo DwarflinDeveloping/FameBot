@@ -98,7 +98,7 @@ class FameUser:
             for key, val in self.data['leveling'].items():
                 if key.startswith('season'):
                     continue
-                self.data['leveling']['season_1'][key] = val
+                self.data['leveling']['season_1'][key] = deepcopy(val)
                 self.data['leveling'][key] = 0
             self.data['claims'].append('season1_transferred')
 
