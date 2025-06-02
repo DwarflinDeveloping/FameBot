@@ -11,7 +11,8 @@ COUNTRY_DATA_PRESET = {country.alpha_2: PV_PRESET.copy() for country in pycountr
 
 GAME_DATA_PRESET = {
     'maintenance': False,
-    'daily_giveaway': None
+    'daily_giveaway': None,
+    'daily_boosted_countries': None
 }
 
 APP_DATA_PRESET = {
@@ -20,6 +21,7 @@ APP_DATA_PRESET = {
     'main_guild': 378587218849300481,
     'giveaway_channel': 1367221046683635793,
     'role_up_channel': 1367441392531542078,
+    'daily_boosts_channel': 1378717383723843775,
     'progression_roles': {
         0: 1363309917926064210,   # Bronze 1
         10: 1363920859953103140,  # Bronze 2
@@ -69,7 +71,15 @@ USER_DATA_PRESET = {
         'quest_xp': 0,
         'gift_xp': 0,
         'title_dupl_xp': 0,
-        'additional_xp': 0
+        'additional_xp': 0,
+        'season_1': {}
+    },
+    'firedust': {
+        'found': 0,
+        'title_dupl': 0,
+        'scavenged': 0,
+        'gifted': 0,
+        'purchases': 0
     },
     'next_vote': None,
     'daily_claim': None,

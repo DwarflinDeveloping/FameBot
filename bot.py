@@ -7,12 +7,13 @@ from copy import deepcopy
 from functools import cached_property
 from math import ceil, floor
 from pathlib import Path
+from pyexpat.errors import messages
 from time import time
 from typing import Tuple, List, Dict, Any, Iterator, Literal, Optional
 
 import discord
 from discord import default_permissions, ApplicationContext, Interaction, Button, User, Member, Option, File, \
-    Embed, ButtonStyle, ui, Bot, Intents, SlashCommandGroup, TextChannel, ClientUser, Role
+    Embed, ButtonStyle, ui, Bot, Intents, SlashCommandGroup, TextChannel, ClientUser, Role, Colour
 from discord.ext import tasks
 
 from data import load_app_data, save_game_data, flags_dir, users_dir, clear_database, USER_DATA_PRESET, \
@@ -24,7 +25,7 @@ from data.resources import get_banner_path, get_banner, get_flag
 from data.titles import RARITY_CHANCES, Title, RARITY_XP
 from data.trivia import TriviaManager
 from data.users import FameUser
-from formatting import get_base_embed, get_title_embed, get_booster_embed, get_streak_embed
+from formatting import get_base_embed, get_title_embed, get_booster_embed, get_streak_embed, get_firedust_embed
 from utils import sort_dict, alpha2_to_country, country_to_alpha2, ALTERNATIVE_CNAMES, incr_symbol, \
     millify, get_rank_symbol, CONTINENT_CODE_TO_NAME, points_per_capita, country_to_continent, format_country_ranking, \
     format_cname, POINTS, VOTES, CTYPES, ALPHA2_COUNTRIES, format_user_ranking
@@ -32,7 +33,8 @@ from utils import sort_dict, alpha2_to_country, country_to_alpha2, ALTERNATIVE_C
 
 class FameBot:
     def __init__(self, cooldown: float = 5, daily_votes: int = 30, recap_scopes: List[str] = None,
-                 leaderboard_topics: List[str] = None, upload_images: bool = False, min_daily_votes: int = 30):
+                 leaderboard_topics: List[str] = None, upload_images: bool = False, min_daily_votes: int = 30,
+                 daily_boost_count: int = 5, daily_boost_factor: float = 1):
         if recap_scopes is None:
             self.visible_recap_scopes = ['daily', 'weekly', 'seasonal']
             self.recap_scopes = self.visible_recap_scopes + ['alltime']
@@ -48,6 +50,8 @@ class FameBot:
         self.daily_votes = daily_votes
         self.upload_images = upload_images
         self.min_daily_votes = min_daily_votes
+        self.daily_boost_count = daily_boost_count
+        self.daily_boost_factor = daily_boost_factor
 
         self.bot: Bot | None = None
         self.title_roles = None
@@ -112,6 +116,16 @@ class FameBot:
         self.save_game_data()
 
     @property
+    def daily_boosted_countries(self) -> List[str]:
+        boosted = self.game_data['daily_boosted_countries']
+        return [] if not boosted else boosted
+
+    @daily_boosted_countries.setter
+    def daily_boosted_countries(self, value: List[str]) -> None:
+        self.game_data['daily_boosted_countries'] = value
+        self.save_game_data()
+
+    @property
     def on_maintenance(self) -> bool:
         return self.game_data['maintenance']
 
@@ -133,7 +147,11 @@ class FameBot:
 
     @cached_property
     def role_up_channel(self) -> TextChannel:
-        return self.bot.get_channel(self.app_data['role_up_channel'])
+        return self.bot.get_channel(self.app_data['daily_boosts_channel'])
+
+    @cached_property
+    def daily_boosts_channel(self) -> TextChannel:
+        return self.bot.get_channel(self.app_data['daily_boosts_channel'])
 
     @property
     def admin_ids(self) -> List[int]:
@@ -303,6 +321,23 @@ class FameBot:
 
         return get_title_embed(title, compensation)
 
+    def get_random_firedust(self) -> int | None:
+        # firedust_chance = 1
+        firedust_chance = .025
+        firedust_found = random.random() <= firedust_chance
+        if not firedust_found:
+            return None
+
+        return random.choices([10, 20, 30, 40, 50, 100, 200], weights=[5, 10, 10, 10, 10, 2, 1], k=1)[0]
+
+    def spawn_firedust(self, user: FameUser) -> Embed | None:
+        amount = self.get_random_firedust()
+        if amount is None:
+            return None
+
+        user.found_firedust += amount
+        return get_firedust_embed(amount)
+
     def spawn_boosters(self, user: FameUser, guaranteed: bool = False) -> discord.Embed | None:
         user.check_starter_booster()
         booster_found = random.random() <= .025
@@ -325,7 +360,7 @@ class FameBot:
         prev_order = (self.get_order(POINTS), self.get_order(VOTES))
         old_level = user.level
 
-        points_gained, xp_gained = user.do_vote(votes_count, alpha2, booster_applies, gives_xp)
+        points_gained, xp_gained = user.do_vote(votes_count, alpha2, self.daily_boosted_countries, self.daily_boost_factor, booster_applies, gives_xp)
 
         for scope in self.recap_scopes:
             recap = self.get_recap(scope)
@@ -353,6 +388,7 @@ class FameBot:
     def vote_args(self, alpha2, c_name: str, fame_user: FameUser, user: User) -> Dict[str, Any]:
         booster_embed = self.spawn_boosters(fame_user, guaranteed=True if fame_user.last_booster >= 75 else False)
         title_embed = self.spawn_titles(fame_user)
+        dust_embed = self.spawn_firedust(fame_user)
 
         fame_user.update_next_vote(self.cooldown)
         fame_user.daily_votes += 1
@@ -474,7 +510,7 @@ class FameBot:
                 async def boosters_callback(self2, button: Button, interaction: Interaction):
                     if not await self2.check_user(interaction):
                         return
-                    await interaction.respond(**self.booster_args(interaction))
+                    await interaction.respond(**self.activate_booster_args(interaction))
 
             def set_again_state(self, value: bool):
                 for item in self.children:
@@ -483,7 +519,7 @@ class FameBot:
                         break
 
         vote_args['embeds'].append(embed)
-        for embed in [booster_embed, title_embed, quest_embed]:
+        for embed in [booster_embed, title_embed, quest_embed, dust_embed]:
             if embed is not None:
                 vote_args['embeds'].append(embed)
         if role_up:
@@ -532,7 +568,7 @@ class FameBot:
 
         return {'embed': embed, 'view': DetailView()}
 
-    def booster_args(self, ctx: ApplicationContext | Interaction):
+    def activate_booster_args(self, ctx: ApplicationContext | Interaction):
         fame_user = self.get_user(ctx.user.id)
         fame_user.check_starter_booster()
         has_boosters = len(list(fame_user.boosters)) > 0
@@ -592,19 +628,166 @@ class FameBot:
         embed = get_base_embed(ctx.user, 'Your titles', description=descr)
 
         for rarity, role_list in self.title_roles.items():
-            txt = ''
+            txt, example_title = '', None
             for role in role_list:
-                title = Title(role.name, rarity)
-                if title.name in [r.name for r in fame_user.titles]:
-                    txt += f'{title.name}\n'
+                example_title = Title(role.name, rarity)
+                if fame_user.has_title(role.name):
+                    title = fame_user.get_title(role.name)
+                    descr = f'' if not title.is_maxed else ', :x: Maxed out' if title.is_upgradable else ', :x: Not upgradable'
+                    upgrade_cost = title.upgrade_cost
+                    txt += f'{title.name} (Lvl. {title.leveling}{descr})\n'
                 else:
                     txt += '???\n'
 
-            embed.add_field(name=' '.join([s.capitalize() for s in rarity.lower().split('_')]) + f' (+{RARITY_XP[rarity]}xp)',
-                            value=txt,
+            embed.add_field(
+                name=' '.join([s.capitalize() for s in rarity.lower().split('_')]) + f' +{RARITY_XP.get(rarity)}xp' +
+                     (f' (Upgrade Cost: {example_title.upgrade_cost} :sparkles: Firedust)' if example_title.is_upgradable else ''),
+                value=txt,
+                inline=False)
+
+        class UpgradeSelection(discord.ui.View):
+            @discord.ui.select(
+                options=[discord.SelectOption(label=title.name, description=f'Cost: {title.upgrade_cost}') for title in fame_user.titles if title.is_upgradable],
+                placeholder='Select a title to upgrade',
+                max_values=1,
+                min_values=1
+            )
+            async def select_callback(self2, select: ui.Select, interaction: Interaction):
+                if interaction.user.id != fame_user.user_id:
+                    await interaction.respond(
+                        embed=get_base_embed(interaction.user, f'This is {ctx.user.name}\'s title menu! Make your own one using /titles', error=True),
+                        ephemeral=True
+                    )
+                    return
+
+                title_rarity = None
+                for rarity_ in RARITY_XP.keys():
+                    if any(r.name == select.values[0] for r in self.title_roles[rarity_]):
+                        title_rarity = rarity_
+
+                title_ = Title(select.values[0], title_rarity)
+                if fame_user.total_firedust < title_.upgrade_cost:
+                    await interaction.respond(
+                        embed=get_base_embed(interaction.user,
+                                             f'You need **{title_.upgrade_cost} :sparkles: Firedust** to upgrade this title!',
+                                             error=True),
+                        ephemeral=True
+                    )
+                    return
+
+                fame_user.upgrade_title(title_.name)
+                new_title = fame_user.get_title(title_.name)
+                emb = get_base_embed(
+                    interaction.user,
+                    title=f':arrow_up_small: You have upgraded {title_.name} to **Lvl. {new_title.leveling}**!',
+                    description=f'This title now gives you +{new_title.xp_incr}xp per vote.'
+                )
+                await interaction.respond(embed=emb)
+
+        return {'embed': embed, 'view': UpgradeSelection()}
+
+    def title_upgrade_args(self, ctx: ApplicationContext | Interaction):
+        fame_user = self.get_user(ctx.user.id)
+        embed = get_base_embed(ctx.user, ':speech_balloon: Title Upgrades')
+
+        embed.add_field(name='Your Firedust',
+                        value=f'**{fame_user.total_firedust} :sparkles: Firedust**',
+                        inline=False)
+
+        for title in fame_user.titles:
+            embed.add_field(name=title.name,
+                            value=f'Level: {title.leveling}\n' \
+                                  f'Upgrade Cost: **{title.upgrade_cost} :sparkles: Firedust**' if not title.is_maxed else ':x: Title is maxed out',
                             inline=False)
 
-        return {'embed': embed}
+        class BoosterSelect(discord.ui.View):
+            @discord.ui.select(
+                options=[discord.SelectOption(label=b.name, emoji=b.symbol) for b in boosters if b.firedust_cost],
+                placeholder='Select a booster to purchase',
+                max_values=1,
+                min_values=1
+            )
+            async def select_callback(self2, select: ui.Select, interaction: Interaction):
+                if interaction.user.id != fame_user.user_id:
+                    await interaction.respond(
+                        embed=get_base_embed(interaction.user, f'This is {ctx.user.name}\'s booster menu! Make your own one using /boosters', error=True),
+                        ephemeral=True
+                    )
+                    return
+
+                boo = Booster.from_name(select.values[0])()
+                if fame_user.total_firedust < boo.firedust_cost:
+                    await interaction.respond(
+                        embed=get_base_embed(interaction.user,
+                                             f'You need **{boo.firedust_cost} :sparkles: Firedust** to purchase one {boo.formatted_name}',
+                                             error=True),
+                        ephemeral=True
+                    )
+                    return
+
+                fame_user.purchase_booster(boo)
+                emb = get_base_embed(
+                    interaction.user,
+                    title=f'{boo.symbol} You have purchased a {boo.name}!',
+                    description=f'Active boosters using **/boosters**.',
+                    colour=boo.color
+                )
+                await interaction.respond(embed=emb)
+
+        return {'embed': embed, 'view': BoosterSelect()}
+
+    def booster_shop_args(self, ctx: ApplicationContext | Interaction):
+        fame_user = self.get_user(ctx.user.id)
+        embed = get_base_embed(ctx.user, ':arrow_double_up: Booster Shop')
+
+        embed.add_field(name='Your Firedust',
+                        value=f'**{fame_user.total_firedust} :sparkles: Firedust**',
+                        inline=False)
+
+        for booster in boosters:
+            if booster.firedust_cost is None:
+                continue
+
+            embed.add_field(name=booster.formatted_name if fame_user.total_firedust >= booster.firedust_cost else f'**:x: {booster.name}**',
+                            value=f'Cost: **{booster.firedust_cost} :sparkles: Firedust**\n' \
+                                  f'Boost factor: {booster.format_boost()} (20xp -> {floor(20 * (1 + booster.boost))}xp)\n',
+                            inline=False)
+
+        class BoosterSelect(discord.ui.View):
+            @discord.ui.select(
+                options=[discord.SelectOption(label=b.name, emoji=b.symbol) for b in boosters if b.firedust_cost],
+                placeholder='Select a booster to purchase',
+                max_values=1,
+                min_values=1
+            )
+            async def select_callback(self2, select: ui.Select, interaction: Interaction):
+                if interaction.user.id != fame_user.user_id:
+                    await interaction.respond(
+                        embed=get_base_embed(interaction.user, f'This is {ctx.user.name}\'s booster menu! Make your own one using /boosters', error=True),
+                        ephemeral=True
+                    )
+                    return
+
+                boo = Booster.from_name(select.values[0])()
+                if fame_user.total_firedust < boo.firedust_cost:
+                    await interaction.respond(
+                        embed=get_base_embed(interaction.user,
+                                             f'You need **{boo.firedust_cost} :sparkles: Firedust** to purchase one {boo.formatted_name}',
+                                             error=True),
+                        ephemeral=True
+                    )
+                    return
+
+                fame_user.purchase_booster(boo)
+                emb = get_base_embed(
+                    interaction.user,
+                    title=f'{boo.symbol} You have purchased a {boo.name}!',
+                    description=f'Active boosters using **/boosters**.',
+                    colour=boo.color
+                )
+                await interaction.respond(embed=emb)
+
+        return {'embed': embed, 'view': BoosterSelect()}
 
     async def check_permissions(self, ctx: ApplicationContext | Interaction, admin_only: bool) -> bool:
         is_admin = ctx.user.id in self.admin_ids
@@ -667,14 +850,17 @@ class FameBot:
         embed = get_streak_embed(reward)
         await ctx.channel.send(dc_user.mention, embed=embed)
 
-    def reset_daily_votes(self):
+    def reset_daily_users(self) -> None:
         for user in self.users:
             if user.daily_votes < self.min_daily_votes:
                 user.daily_streak = 0
             user.daily_votes = 0
+
+            user.reset_daily_quests(self.trivia, 5, list(self.titles))
+
             user.save()
 
-    async def create_giveaway(self):
+    async def create_giveaway(self) -> None:
         giveaway = Giveaway.generate(list(self.titles))
         self.daily_giveaway = giveaway
 
@@ -683,6 +869,18 @@ class FameBot:
         embed.add_field(name='How to participate?',
                         value=f'Anyone who does {self.min_daily_votes} or more votes in the next 24 hours enters the giveaway.')
         await self.giveaway_channel.send(embed=embed)
+
+    async def create_daily_boost(self) -> None:
+        giveaway = Giveaway.generate(list(self.titles))
+        self.daily_giveaway = giveaway
+
+        countries = random.choices(ALPHA2_COUNTRIES, k=self.daily_boost_count)
+        countries_str = '\n'.join([f'- {format_cname(alpha2, alpha2_to_country(alpha2))}' for alpha2 in countries])
+        self.daily_boosted_countries = countries
+
+        embed = get_base_embed(self.bot.user, ':sunny: Solar Flare',
+                                    description=f'Points for the following countries are doubled today:\n\n{countries_str}')
+        await self.daily_boosts_channel.send(embed=embed)
 
     async def resolve_giveaway(self):
         assert self.daily_giveaway is not None  # daily giveaway should always exist
@@ -834,7 +1032,10 @@ class FameBot:
             if self.daily_giveaway is not None:
                 await self.resolve_giveaway()
             await self.create_giveaway()
-            self.reset_daily_votes()
+
+            await self.create_daily_boost()
+
+            self.reset_daily_users()
 
         alltime_recap = self.get_recap('alltime')
         for scope in scopes:
@@ -870,6 +1071,8 @@ class FameBot:
         gift_cmds = SlashCommandGroup('gift', 'make gifts to other users')
         top_cmds = SlashCommandGroup('top', 'leaderboards')
         user_cmds = SlashCommandGroup('user', 'user-related commands')
+        booster_cmds = SlashCommandGroup('boosters', 'booster-related commands')
+        title_cmds = SlashCommandGroup('titles', 'title-related commands')
 
         @self.bot.slash_command(
             name='cvote',
@@ -957,6 +1160,14 @@ class FameBot:
         @default_permissions(administrator=True)
         async def gen_giveaway_cmd(ctx: ApplicationContext):
             await self.create_giveaway()
+
+        @self.bot.slash_command(
+            name='gen_flare',
+            guild_ids=self.admin_guilds
+        )
+        @default_permissions(administrator=True)
+        async def gen_flare_cmd(ctx: ApplicationContext):
+            await self.create_daily_boost()
 
         @self.bot.slash_command(
             name='gen_daily',
@@ -1234,9 +1445,11 @@ class FameBot:
 
             embed = get_base_embed(ctx.author, title=f'{user.name}\'s Profile')
             embed.add_field(name='Leveling',
-                            value=fame_user.leveling_formatted +
-                                  f'\n{ceil(fame_user.xp_until_next_level)}xp until next level',
-                            inline=False)
+                            value=f'{fame_user.leveling_formatted}'
+                                  f'\n{ceil(fame_user.xp_until_next_level)}xp until next level\n'
+                                  f'(From Season 1: {fame_user.season_1_level} Levels)',
+                            inline=True)
+            embed.add_field(name='Available Firedust', value=str(fame_user.total_firedust), inline=False)
             embed.add_field(name='Total votes', value=str(fame_user.total_votes), inline=True)
             embed.add_field(name='Total points', value=str(fame_user.total_points), inline=True)
             embed.add_field(name='Daily streak',
@@ -1268,15 +1481,99 @@ class FameBot:
 
             await uinfo_cmd(ctx, ctx.user)
 
-        @self.bot.slash_command(
-            name='boosters',
-            description='View your available boosters'
+        @booster_cmds.command(
+            name='sell',
+            description='Sell your boosters to obtain firedust'
         )
-        async def boosters_cmd(ctx: ApplicationContext):
+        async def sell_booster_cmd(ctx: ApplicationContext, booster: Option(str, choices=booster_names), amount: Optional[int]):
             if not await self.check_permissions(ctx, False):
                 return
 
-            await ctx.respond(**self.booster_args(ctx))
+            fame_user = self.get_user(ctx.user.id)
+            booster_cls = booster_name_to_cls.get(booster, None)
+            if booster_cls is None:
+                raise AssertionError
+
+            booster_count = fame_user.data['boosters'].get(booster_cls.name, 0)
+            if amount is None:
+                amount = booster_count
+            if booster_count < amount or booster_count == 0:
+                await ctx.respond(
+                    embed=get_base_embed(ctx.user, f'You don\'t have enough {booster_cls.format_name()}s!'),
+                    ephemeral=True
+                )
+                return
+            if not booster_cls.firedust_cost:
+                await ctx.respond(
+                    embed=get_base_embed(ctx.user, f'{booster_cls.format_name()}s cannot be sold or bought!'),
+                    ephemeral=True
+                )
+                return
+
+            firedust_amount = amount * booster_cls.firedust_cost
+            fame_user.data['boosters'][booster_cls.name] -= amount
+            fame_user.scavenged_firedust += firedust_amount
+
+            await ctx.respond(
+                embed=get_base_embed(ctx.user, f'You have sold {amount}x {booster_cls.format_name()}s for {firedust_amount} :sparkles: Firedust!'),
+                ephemeral=True
+            )
+
+        @booster_cmds.command(
+            name='activate',
+            description='Active available boosters'
+        )
+        async def activate_boosters_cmd(ctx: ApplicationContext):
+            if not await self.check_permissions(ctx, False):
+                return
+
+            await ctx.respond(**self.activate_booster_args(ctx))
+
+        @booster_cmds.command(
+            name='buy',
+            description='Spent your firedust on boosters',
+        )
+        async def buy_boosters_cmd(ctx: ApplicationContext):
+            if not await self.check_permissions(ctx, False):
+                return
+
+            await ctx.respond(**self.booster_shop_args(ctx))
+
+        @booster_cmds.command(
+            name='scrap',
+            description='Remove your currently active booster'
+        )
+        async def scrap_boosters_cmd(ctx: ApplicationContext):
+            if not await self.check_permissions(ctx, False):
+                return
+
+            user = self.get_user(ctx.user.id)
+
+            if not user.has_active_booster:
+                await ctx.respond(
+                    embed=get_base_embed(
+                        ctx.author,f'You don\'t have an active booster to scrap!',error=True
+                    ), ephemeral=True
+                )
+                return
+
+            class ConfirmationView(ui.View):
+                @ui.button(label='Scrap my booster', style=ButtonStyle.green, custom_id='confirm')
+                async def again_callback(self2, button: Button, interaction: Interaction):
+                    if not await self.check_permissions(interaction, False):
+                        return
+
+                    await interaction.respond(embed=get_base_embed(
+                        ctx.author, f'Your active {user.active_booster.formatted_name} was scrapped.'
+                    ))
+                    user.scrap_booster()
+
+            confirmation_embed = get_base_embed(
+                ctx.author, 'Are you sure your active booster should be scrapped?',
+                description=f'This means you will permanently loose your {user.active_booster.formatted_name} with {user.active_booster.left_duration} left duration.'
+            )
+
+            await ctx.respond(view=ConfirmationView(), embed=confirmation_embed, ephemeral=True)
 
         @self.bot.slash_command(
             name='titles',
@@ -1327,13 +1624,15 @@ class FameBot:
                 return
 
             await ctx.defer(ephemeral=True)
-            await self.fetch_votes(ctx.channel)
+            await self.fetch_titles(ctx.channel)
             await ctx.respond('analysis finished!', ephemeral=True)
 
         self.bot.add_application_command(country_cmds)
         self.bot.add_application_command(gift_cmds)
         self.bot.add_application_command(top_cmds)
         self.bot.add_application_command(user_cmds)
+        self.bot.add_application_command(booster_cmds)
+        # self.bot.add_application_command(title_cmds)
 
         @self.bot.listen(once=True)
         async def on_ready():
@@ -1370,8 +1669,45 @@ class FameBot:
         for user_id, udata in user_data.items():
             Path('users2', f'{user_id}.json').write_text(json.dumps(udata, indent=2))
 
+    async def fetch_titles(self, channel: TextChannel):
+        Path('users5755762').mkdir(exist_ok=True)
+        user_data = {}
+
+        bot_id = 1071362480347041802
+        channels = [channel for channel in channel.guild.channels if channel.category_id == 1361995334246469703]
+        for channel in channels:
+            for message in await channel.history(limit=300).flatten():
+                if not message.author.id == bot_id or not message.embeds:
+                    continue
+
+                title_embed = None
+                for embed in message.embeds:
+                    if 'You have found a ' in embed.title and 'title' in embed.title:
+                        title_embed = embed
+                        break
+
+                if title_embed is None:
+                    continue
+
+                a, b = title_embed.title.split(' title: ')
+                title_rarity = a.split(' found a ')[1].upper().replace(' ', '_')
+                title_name = b.replace('!', '').strip()
+
+                user = message.guild.get_member_named(message.embeds[0].footer.text)
+                if user.id not in user_data:
+                    user_data[user.id] = deepcopy(self.get_user(user.id).data)
+                if any([title['name'] == title_name for title in user_data[user.id]['titles']]):
+                    user_data[user.id]['titles'][[title['name'] == title_name for title in user_data[user.id]['titles']].index(True)]['amount_found'] += 1
+                else:
+                    user_data[user.id]['titles'].append({'rarity': title_rarity, 'name': title_name, 'amount_found': 1})
+
+        for user_id, udata in user_data.items():
+            Path('users5755762', f'{user_id}.json').write_text(json.dumps(udata, indent=2))
+
     def run(self):
         intents = Intents.default()
+        intents.message_content = True
+        intents.members = True
         self.bot = Bot(intents=intents)
         self.register_cmds()
         self.recap_task.start()

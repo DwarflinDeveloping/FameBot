@@ -1,4 +1,5 @@
 import dataclasses
+from math import floor
 from typing import Literal
 
 from discord import Color
@@ -35,15 +36,20 @@ RARITY_CHANCES = {
     'SPECIAL': 0
 }
 
-
 @dataclasses.dataclass(frozen=True)
 class Title:
     name: str
     rarity: RARITIES
+    leveling: int = 1
+    amount_found: int = None
 
     def __iter__(self):
         yield 'name', self.name
         yield 'rarity', self.rarity
+        if self.leveling is not None:
+            yield 'leveling', self.leveling
+        if self.amount_found is not None:
+            yield 'amount_found', self.amount_found
 
     def __str__(self) -> str:
         return self.name
@@ -58,11 +64,23 @@ class Title:
 
     @property
     def xp_incr(self) -> int:
-        return RARITY_XP.get(self.rarity, 0)
+        return RARITY_XP.get(self.rarity, 0) * self.leveling
+
+    @property
+    def is_upgradable(self):
+        return self.rarity != 'SPECIAL'
+
+    @property
+    def upgrade_cost(self) -> int:
+        return self.compensation * 10
 
     @property
     def compensation(self) -> int:
-        return self.xp_incr * 200
+        return RARITY_XP.get(self.rarity, 0) * 5
+
+    @property
+    def is_maxed(self):
+        return self.leveling >= 10
 
     @property
     def spawn_chance(self) -> float:
@@ -70,9 +88,10 @@ class Title:
 
     def apply(self, user) -> bool:
         if not user.has_title(self.name):
-            user.add_title(self)
+            user.increase_found_titles(self, amount=1)
             user.save()
             return False
+
         else:
-            user.title_dupl_xp += self.compensation
+            user.title_dupl_firedust += self.compensation
             return True

@@ -31,13 +31,21 @@ def get_booster_embed(booster: Booster) -> Embed:
 
 def get_title_embed(title: Title, compensation: bool = False) -> Embed:
     if compensation:
-        descr1 = f'Since you already have this title, you instead get {title.compensation}xp.'
+        descr1 = f'Since you already have this title, you instead get **{title.compensation} :sparkles: firedust**.'
     else:
         descr1 = f'This title will make you gain {title.xp_incr} more xp per vote permanently.'
     embed = Embed(
         title=f':speech_balloon: You have found a {title.formatted_rarity} title: {title.name}!',
         colour=title.color,
-        description=descr1 + '\nView your title collection using **/titles**'
+        description=descr1 + '\nView your title collection using **/titles info**'
+    )
+    return embed
+
+def get_firedust_embed(amount: int) -> Embed:
+    embed = Embed(
+        title=f':sparkles: You have found {amount} Firedust!',
+        colour=Colour.gold(),
+        description='Firedust can be used to upgrade titles (see **/titles**) and buy boosters (see **/shop**)'
     )
     return embed
 
@@ -46,3 +54,4 @@ def get_streak_embed(reward: StreakReward) -> Embed:
         title=f':gift: Daily streak completed!',
         description=f'You have been granted the following rewards:\n{reward}'
     )
+

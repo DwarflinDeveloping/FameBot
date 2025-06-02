@@ -37,7 +37,7 @@ class FameUser:
             for key, preset_val in USER_DATA_PRESET.items():
                 if key not in user_data:
                     user_data[key] = deepcopy(preset_val)
-                elif key in ['leveling']:
+                elif key in ('leveling', 'firedust'):
                     for subkey, subval in preset_val.items():
                         if subkey not in user_data[key]:
                             user_data[key][subkey] = subval
@@ -86,6 +86,21 @@ class FameUser:
                 del self.data['titles'][n]
             else:
                 title_names.append(title['name'])
+
+        if 'title_update' not in self.data['claims']:
+            self.data['titles'] = []  # resetting titles
+
+            self.data['firedust']['title_dupl'] = floor(self.data['leveling']['title_dupl_xp'] / 40)
+            self.data['leveling']['title_dupl_xp'] = 0
+            self.data['claims'].append('title_update')
+
+        if 'season1_transferred' not in self.data['claims']:
+            for key, val in self.data['leveling'].items():
+                if key.startswith('season'):
+                    continue
+                self.data['leveling']['season_1'][key] = val
+                self.data['leveling'][key] = 0
+            self.data['claims'].append('season1_transferred')
 
 
     @property
@@ -176,7 +191,47 @@ class FameUser:
     @vote_xp.setter
     def vote_xp(self, value: int) -> None:
         self.data['leveling']['vote_xp'] = value
+    
+    @property
+    def found_firedust(self) -> int:
+        return self.data['firedust']['found']
+    
+    @found_firedust.setter
+    def found_firedust(self, value: int) -> None:
+        self.data['firedust']['found'] = value
 
+    @property
+    def title_dupl_firedust(self) -> int:
+        return self.data['firedust']['title_dupl']
+
+    @title_dupl_firedust.setter
+    def title_dupl_firedust(self, value: int) -> None:
+        self.data['firedust']['title_dupl'] = value
+    
+    @property
+    def scavenged_firedust(self) -> int:
+        return self.data['firedust']['scavenged']
+    
+    @scavenged_firedust.setter
+    def scavenged_firedust(self, value: int) -> None:
+        self.data['firedust']['scavenged'] = value
+
+    @property
+    def gifted_firedust(self) -> int:
+        return self.data['firedust']['gifted']
+
+    @gifted_firedust.setter
+    def gifted_firedust(self, value: int) -> None:
+        self.data['firedust']['gifted'] = value
+
+    @property
+    def firedust_purchases(self) -> int:
+        return self.data['firedust']['purchases']
+
+    @firedust_purchases.setter
+    def firedust_purchases(self, value: int) -> None:
+        self.data['firedust']['purchases'] = value
+    
     @property
     def daily_claim(self) -> int | None:
         return self.data['daily_claim']
@@ -205,7 +260,7 @@ class FameUser:
     @property
     def titles(self) -> Iterator[Title]:
         for title_data in self.data['titles']:
-            yield Title(title_data['name'], title_data['rarity'])
+            yield Title(title_data['name'], title_data['rarity'], title_data['leveling'], title_data['amount_found'])
 
     @property
     def daily_quests(self) -> Iterator[DailyQuest]:
@@ -235,11 +290,30 @@ class FameUser:
             for quest_type in sample(daily_quests, amount)
         ]
 
-    def has_title(self, title_name: str):
+    def has_title(self, title_name: str) -> bool:
         return title_name in [title.name for title in self.titles]
 
     def add_title(self, title: Title):
-        self.data['titles'].append(dict(title))
+        title_dict = dict(title)
+        if title.leveling is None:
+            title_dict['leveling'] = 1
+        self.data['titles'].append(title_dict)
+
+    def get_title(self, title_name: str) -> Title | None:
+        for title in self.titles:
+            if title.name == title_name:
+                return title
+        return None
+
+    def increase_found_titles(self, title: Title, amount: int = 1):
+        for i, title_data in enumerate(self.data['titles']):
+            if title_data['name'] == title.name:
+                self.data['titles'][i]['amount_found'] += 1
+                return
+
+        new_data = dict(title)
+        new_data['amount_found'] = amount
+        self.data['titles'].append(new_data)
 
     @property
     def active_booster(self) -> Booster | None:
@@ -268,6 +342,19 @@ class FameUser:
 
         self.active_booster = booster
 
+    def scrap_booster(self):
+        self.active_booster = None
+
+    def purchase_booster(self, booster: Type[Booster]):
+        self.add_booster(booster)
+        self.firedust_purchases -= booster.firedust_cost
+
+    def upgrade_title(self, title_name: str):
+        for i, title in enumerate(self.titles):
+            if title.name == title_name:
+                self.firedust_purchases -= title.upgrade_cost
+                self.data['titles'][i]['leveling'] += 1
+
     @property
     def last_booster(self) -> int:
         return self.data['last_booster']
@@ -276,24 +363,31 @@ class FameUser:
     def last_booster(self, value: int) -> None:
         self.data['last_booster'] = value
 
-    def do_vote(self, vote_count: int, alpha2: str, booster_applies: bool = True,
-                gives_xp: bool = True) -> Tuple[int, int]:
+    def do_vote(self, vote_count: int, alpha2: str, daily_boosted_countries: List[str], daily_boost_factor: float,
+                booster_applies: bool = True, gives_xp: bool = True, ) -> Tuple[int, int]:
+
         points_gained, xp_gained = 0, 0
         for _ in range(vote_count):
             points_incr = self.points_per_vote
             xp_incr = self.xp_per_vote if gives_xp else 0
 
-            if booster_applies and self.has_active_booster:
+            if booster_applies:
                 booster = self.active_booster
-                points_incr *= 1 + booster.boost
-                if booster.boosts_xp:
-                    xp_incr *= 1 + booster.boost
-                points_incr, xp_incr = floor(points_incr), floor(xp_incr)
-                booster.left_duration -= 1
-                if booster.left_duration <= 0:
-                    self.active_booster = None
-                else:
-                    self.data['active_booster'] = dict(booster)
+
+                if alpha2 in daily_boosted_countries:
+                    points_incr *= 1 + daily_boost_factor
+
+                if self.has_active_booster:
+                    points_incr *= 1 + booster.boost
+                    if booster.boosts_xp:
+                        xp_incr *= 1 + booster.boost
+
+                    points_incr, xp_incr = floor(points_incr), floor(xp_incr)
+                    booster.left_duration -= 1
+                    if booster.left_duration <= 0:
+                        self.active_booster = None
+                    else:
+                        self.data['active_booster'] = dict(booster)
 
             points_gained += points_incr
             xp_gained += xp_incr
@@ -348,8 +442,21 @@ class FameUser:
         self.next_vote = time() + cooldown
 
     @property
-    def total_xp(self):
-        return self.start_xp + self.vote_xp + self.giveaway_xp + self.quest_xp + self.gift_xp + self.title_dupl_xp + self.additional_xp
+    def season_1_xp(self):
+        return sum(list(self.data['leveling']['season_1'].values()))
+
+    @property
+    def current_xp(self):
+        return self.start_xp + self.vote_xp + self.giveaway_xp + self.quest_xp + self.gift_xp + self.title_dupl_xp + \
+               self.additional_xp
+
+    @property
+    def lifetime_xp(self):
+        return self.current_xp + self.season_1_xp
+
+    @property
+    def total_firedust(self) -> int:
+        return self.found_firedust + self.scavenged_firedust + self.gifted_firedust + self.firedust_purchases + self.title_dupl_firedust
 
     @property
     def next_level_xp(self) -> float:
@@ -358,16 +465,22 @@ class FameUser:
             xp_threshold *= 1 + self.xp_leveling_factor
         return xp_threshold
 
-    @property
-    def leveling(self) -> float:
+    def leveling_by_xp(self, xp: int) -> float:
         level = 0
         xp_threshold = self.start_xp  # XP required for level 1
-        xp = self.total_xp
         while xp >= xp_threshold:
             level += 1
             xp -= xp_threshold
             xp_threshold *= 1 + self.xp_leveling_factor
         return level + xp / xp_threshold
+
+    @property
+    def season_1_level(self) -> int:
+        return floor(self.leveling_by_xp(self.season_1_xp))
+
+    @property
+    def leveling(self) -> float:
+        return self.season_1_level + self.leveling_by_xp(self.current_xp)
 
     @property
     def xp_until_next_level(self) -> float:
@@ -378,7 +491,7 @@ class FameUser:
             xp_threshold *= 1 + self.xp_leveling_factor
 
         # Calculate the difference between next level's threshold and current XP
-        return self.next_level_xp - (self.total_xp - current_level_xp)
+        return self.next_level_xp - (self.current_xp - current_level_xp)
 
     @property
     def level(self) -> int:
