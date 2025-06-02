@@ -95,15 +95,12 @@ class FameUser:
             self.data['claims'].append('title_update')
 
         if 'season1_transferred' not in self.data['claims']:
-            print(1, self.data['leveling'])
             for key, val in self.data['leveling'].items():
                 if key.startswith('season'):
                     continue
                 self.data['leveling']['season_1'][key] = val
                 self.data['leveling'][key] = 0
-            print(2, self.data['leveling']['season_1'])
             self.data['claims'].append('season1_transferred')
-        print(3, self.data['leveling'])
 
 
     @property
