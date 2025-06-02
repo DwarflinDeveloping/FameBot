@@ -461,7 +461,7 @@ class FameUser:
     @property
     def next_level_xp(self) -> float:
         xp_threshold = self.start_xp
-        for _ in range(self.level):
+        for _ in range(floor(self.current_leveling)):
             xp_threshold *= 1 + self.xp_leveling_factor
         return xp_threshold
 
@@ -475,6 +475,10 @@ class FameUser:
         return level + xp / xp_threshold
 
     @property
+    def current_leveling(self) -> float:
+        return self.leveling_by_xp(self.current_xp)
+
+    @property
     def season_1_level(self) -> int:
         return floor(self.leveling_by_xp(self.season_1_xp))
 
@@ -486,7 +490,7 @@ class FameUser:
     def xp_until_next_level(self) -> float:
         current_level_xp = 0
         xp_threshold = self.start_xp
-        for _ in range(self.level):
+        for _ in range(floor(self.current_leveling)):
             current_level_xp += xp_threshold
             xp_threshold *= 1 + self.xp_leveling_factor
 
@@ -519,7 +523,7 @@ class FameUser:
                 return top_role
             else:
                 top_role = role
-        return None
+        return list(progressions.values())[-1]
 
     @property
     def leveling_formatted(self) -> str:
