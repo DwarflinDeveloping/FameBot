@@ -147,7 +147,7 @@ class FameBot:
 
     @cached_property
     def role_up_channel(self) -> TextChannel:
-        return self.bot.get_channel(self.app_data['daily_boosts_channel'])
+        return self.bot.get_channel(self.app_data['role_up_channel'])
 
     @cached_property
     def daily_boosts_channel(self) -> TextChannel:
