@@ -639,7 +639,6 @@ class FameBot:
                 else:
                     txt += '???\n'
 
-            print(' '.join([s.capitalize() for s in rarity.lower().split('_')]) + f' +{RARITY_XP.get(rarity)}xp')
             embed.add_field(
                 name=' '.join([s.capitalize() for s in rarity.lower().split('_')]) + f' +{RARITY_XP.get(rarity)}xp' +
                      (f' (Upgrade Cost: {example_title.upgrade_cost} :sparkles: Firedust)' if example_title.is_upgradable else ''),
@@ -685,7 +684,10 @@ class FameBot:
                 )
                 await interaction.respond(embed=emb)
 
-        return {'embed': embed, 'view': UpgradeSelection()}
+        kwargs = {'embed': embed}
+        if len(list(fame_user.titles)) > 0:
+            kwargs['view'] = UpgradeSelection()
+        return kwargs
 
     def title_upgrade_args(self, ctx: ApplicationContext | Interaction):
         fame_user = self.get_user(ctx.user.id)
