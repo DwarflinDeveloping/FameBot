@@ -36,12 +36,17 @@ RARITY_CHANCES = {
     'SPECIAL': 0
 }
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass()
 class Title:
     name: str
     rarity: RARITIES
     leveling: int = 1
     amount_found: int = None
+    is_equipped: bool = None
+    daily_votes: int = None
+    alltime_votes: int = None
+    coin_balance: int = None
+    last_used: int = None
 
     def __iter__(self):
         yield 'name', self.name
@@ -50,6 +55,16 @@ class Title:
             yield 'leveling', self.leveling
         if self.amount_found is not None:
             yield 'amount_found', self.amount_found
+        if self.is_equipped is not None:
+            yield 'is_equipped', self.is_equipped
+        if self.daily_votes is not None:
+            yield 'daily_votes', self.daily_votes
+        if self.alltime_votes is not None:
+            yield 'alltime_votes', self.alltime_votes
+        if self.coin_balance is not None:
+            yield 'coin_balance', self.coin_balance
+        if self.last_used is not None:
+            yield 'last_used', self.last_used
 
     def __str__(self) -> str:
         return self.name
@@ -71,12 +86,16 @@ class Title:
         return self.rarity != 'SPECIAL'
 
     @property
+    def is_equipable(self):
+        return self.rarity != 'SPECIAL'
+
+    @property
     def upgrade_cost(self) -> int:
         return self.compensation * 10
 
     @property
     def compensation(self) -> int:
-        return RARITY_XP.get(self.rarity, 0) * 5
+        return RARITY_XP.get(self.rarity, 0) * 10
 
     @property
     def is_maxed(self):

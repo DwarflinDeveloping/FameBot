@@ -1,4 +1,5 @@
 import datetime
+from typing import List
 
 from discord import Embed, User, Colour
 
@@ -55,3 +56,10 @@ def get_streak_embed(reward: StreakReward) -> Embed:
         description=f'You have been granted the following rewards:\n{reward}'
     )
 
+def get_maxed_titles_embed(maxed_titles: List[Title]) -> Embed:
+    return Embed(
+        title=f':gift: Title maximum reached!',
+        description=f'You have just reached the max daily vote for the following titles:\n' +
+                    '\n'.join([f'* {title.name}' for title in maxed_titles]) +
+                    '\nEquip other titles to earn more **:coin: BotCoins**'
+    )

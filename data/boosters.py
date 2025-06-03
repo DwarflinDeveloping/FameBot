@@ -17,6 +17,7 @@ class Booster:
     symbol: str = ''
     firedust_cost: int | None = None
     boosts_xp: bool = False
+    id: str = None
 
     def __init__(self, left_duration: int = None):
         self.left_duration = left_duration if left_duration is not None else self.get_rand_duration()
@@ -88,6 +89,7 @@ class StarterBooster(Booster):
     spawn_chance = 0
     boosts_xp = True
     color = Color.dark_red()
+    id = 'st'
 
 class RoleUpBooster(Booster):
     name = 'Role Up Firepower'
@@ -96,6 +98,7 @@ class RoleUpBooster(Booster):
     base_duration = 20
     spawn_chance = 0
     color = Color.yellow()
+    id = 'ru'
 
 class BronzeBooster(Booster):
     name = 'Bronze Firepower'
@@ -105,6 +108,7 @@ class BronzeBooster(Booster):
     spawn_chance = 110
     color = Color.from_rgb(140, 85, 65)
     firedust_cost = 5
+    id = 'br'
 
 class SilverBooster(Booster):
     name = 'Silver Firepower'
@@ -114,6 +118,7 @@ class SilverBooster(Booster):
     spawn_chance = 80
     color = Color.greyple()
     firedust_cost = 10
+    id = 'sv'
 
 class GoldBooster(Booster):
     name = 'Gold Firepower'
@@ -123,6 +128,7 @@ class GoldBooster(Booster):
     spawn_chance = 50
     color = Color.gold()
     firedust_cost = 20
+    id = 'gd'
 
 class DiamondBooster(Booster):
     name = 'Diamond Firepower'
@@ -132,6 +138,7 @@ class DiamondBooster(Booster):
     spawn_chance = 25
     color = Color.blue()
     firedust_cost = 40
+    id = 'di'
 
 class MythicBooster(Booster):
     name = 'Mythic Firepower'
@@ -141,6 +148,7 @@ class MythicBooster(Booster):
     spawn_chance = 8
     color = Color.nitro_pink()
     firedust_cost = 120
+    id = 'my'
 
 class LegendaryBooster(Booster):
     name = 'Legendary Firepower'
@@ -150,6 +158,7 @@ class LegendaryBooster(Booster):
     spawn_chance = 4
     color = Color.dark_green()
     firedust_cost = 300
+    id = 'le'
 
 class MastersBooster(Booster):
     name = 'Masters Firepower'
@@ -159,6 +168,7 @@ class MastersBooster(Booster):
     spawn_chance = 1
     color = Color.brand_red()
     firedust_cost = 600
+    id = 'ma'
 
 class ProBooster(Booster):
     name = 'Pro Firepower'
@@ -168,6 +178,7 @@ class ProBooster(Booster):
     spawn_chance = .5
     color = Color.dark_gold()
     firedust_cost = 1250
+    id = 'pr'
 
 class SeasonalBooster(Booster):
     name = 'Seasonal Firepower'
@@ -176,6 +187,7 @@ class SeasonalBooster(Booster):
     base_duration = 500
     spawn_chance = 0
     color = Color.purple()
+    id = 'ss'
 
 class MysteryBooster(Booster):
     name = 'Mystery Firepower'
@@ -184,6 +196,7 @@ class MysteryBooster(Booster):
     base_duration = 30
     spawn_chance = 0
     color = Color.dark_blue()
+    id = 'my'
 
 class DailyBooster(Booster):
     name = 'Daily Firepower'
@@ -192,6 +205,7 @@ class DailyBooster(Booster):
     base_duration = 80
     spawn_chance = 0
     color = Color.red()
+    id = 'da'
 
 
 boosters = (StarterBooster, RoleUpBooster, BronzeBooster, SilverBooster, GoldBooster, DiamondBooster, MythicBooster,

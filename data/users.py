@@ -260,7 +260,9 @@ class FameUser:
     @property
     def titles(self) -> Iterator[Title]:
         for title_data in self.data['titles']:
-            yield Title(title_data['name'], title_data['rarity'], title_data['leveling'], title_data['amount_found'])
+            yield Title(title_data['name'], title_data['rarity'], title_data['leveling'], title_data['amount_found'],
+                        title_data['is_equipped'], title_data['daily_votes'], title_data['alltime_votes'],
+                        title_data['coin_balance'], title_data['last_used'])
 
     @property
     def daily_quests(self) -> Iterator[DailyQuest]:
@@ -284,20 +286,34 @@ class FameUser:
             self.data['boosters'][booster.name] = 0
         self.data['boosters'][booster.name] += count
 
-    def reset_daily_quests(self, trivia: TriviaManager, amount: int, titles: List[Title]):
+    def reset_daily_quests(self, trivia: TriviaManager, amount: int, titles: List[Title]) -> None:
         self.data['daily_quests'] = [
             dict(DailyQuest.generate(trivia, quest_type, self.daily_streak, titles))
             for quest_type in sample(daily_quests, amount)
         ]
 
+    def reset_daily_votes(self):
+        for i, title_data in enumerate(self.data['titles']):
+            if 'daily_votes' in self.data['titles'][i]:
+                self.data['titles'][i]['daily_votes'] = 0
+
     def has_title(self, title_name: str) -> bool:
         return title_name in [title.name for title in self.titles]
 
-    def add_title(self, title: Title):
+    def add_title(self, title: Title) -> None:
         title_dict = dict(title)
         if title.leveling is None:
             title_dict['leveling'] = 1
         self.data['titles'].append(title_dict)
+
+    def get_title_index(self, title_name: str) -> int | None:
+        for i, title in enumerate(self.data['titles']):
+            if title['name'] == title_name:
+                return i
+        return None
+
+    def update_title_data(self, title: Title) -> None:
+        self.data['titles'][self.get_title_index(title.name)] = dict(title)
 
     def get_title(self, title_name: str) -> Title | None:
         for title in self.titles:
@@ -305,15 +321,37 @@ class FameUser:
                 return title
         return None
 
-    def increase_found_titles(self, title: Title, amount: int = 1):
-        for i, title_data in enumerate(self.data['titles']):
-            if title_data['name'] == title.name:
-                self.data['titles'][i]['amount_found'] += 1
-                return
+    def increase_found_titles(self, title: Title, amount: int = 1) -> None:
+        for user_title in self.titles:
+            if user_title.name == title.name:
+                user_title.amount_found += 1
+                self.update_title_data(user_title)
 
         new_data = dict(title)
+        if new_data.get('is_equipped', None) is None:
+            new_data['is_equipped'] = False
+        if new_data.get('daily_votes', None) is None:
+            new_data['daily_votes'] = 0
+        if new_data.get('alltime_votes', None) is None:
+            new_data['alltime_votes'] = 0
+        if new_data.get('coin_balance', None) is None:
+            new_data['coin_balance'] = 0
+        if new_data.get('last_used', None) is None:
+            new_data['last_used'] = 0
         new_data['amount_found'] = amount
         self.data['titles'].append(new_data)
+
+    @property
+    def equipped_titles(self) -> Iterator[Title]:
+        for title in self.titles:
+            if title.is_equipped:
+                yield title
+
+    def equip_title(self, title_name: str, state: bool = True):
+        for i, title_data in enumerate(self.data['titles']):
+            if title_data['name'] == title_name:
+                self.data['titles'][i]['is_equipped'] = state
+                return
 
     @property
     def active_booster(self) -> Booster | None:
@@ -371,7 +409,7 @@ class FameUser:
             points_incr = self.points_per_vote
             xp_incr = self.xp_per_vote if gives_xp else 0
 
-            if booster_applies:
+            if booster_applies:  # boosters, titles, solar flare
                 booster = self.active_booster
 
                 if alpha2 in daily_boosted_countries:
@@ -388,6 +426,14 @@ class FameUser:
                         self.active_booster = None
                     else:
                         self.data['active_booster'] = dict(booster)
+
+                for title in self.equipped_titles:
+                    title.daily_votes += 1
+                    title.alltime_votes += 1
+                    if title.daily_votes <= 100:
+                        title.coin_balance += 1
+                    self.update_title_data(title)
+
 
             points_gained += points_incr
             xp_gained += xp_incr
@@ -459,6 +505,10 @@ class FameUser:
         return self.found_firedust + self.scavenged_firedust + self.gifted_firedust + self.firedust_purchases + self.title_dupl_firedust
 
     @property
+    def total_coins(self) -> int:
+        return sum([title.coin_balance for title in self.titles if title.coin_balance is not None])
+
+    @property
     def next_level_xp(self) -> float:
         xp_threshold = self.start_xp
         for _ in range(floor(self.current_leveling)):
@@ -519,7 +569,7 @@ class FameUser:
     def get_role(self, progressions: Dict[int, int]) -> int | None:
         top_role = None
         for requirement, role in progressions.items():
-            if requirement > self.leveling:
+            if requirement > self.current_leveling:
                 return top_role
             else:
                 top_role = role
@@ -527,5 +577,5 @@ class FameUser:
 
     @property
     def leveling_formatted(self) -> str:
-        return f'**Lvl. {floor(self.leveling)}** ({floor((self.leveling % 1 + 1e-5)*100)}% progress)'
+        return f'**Lvl. {floor(self.leveling)}** ({floor((self.leveling % 1 + 1e-5) * 100)}% progress)'
 

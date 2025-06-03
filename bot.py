@@ -15,17 +15,19 @@ import discord
 from discord import default_permissions, ApplicationContext, Interaction, Button, User, Member, Option, File, \
     Embed, ButtonStyle, ui, Bot, Intents, SlashCommandGroup, TextChannel, ClientUser, Role, Colour
 from discord.ext import tasks
+import discord.ui
 
 from data import load_app_data, save_game_data, flags_dir, users_dir, clear_database, USER_DATA_PRESET, \
     PV_PRESET, make_dirs, load_game_data, save_app_data
 from data.boosters import RoleUpBooster, Booster, boosters, booster_names, booster_name_to_cls
 from data.prices.giveaways import Giveaway, StreakReward
 from data.recaps import save_data, FameRecap
-from data.resources import get_banner_path, get_banner, get_flag
+from data.resources import get_legacy_path, get_legacy_banner, get_flag, format_embed
 from data.titles import RARITY_CHANCES, Title, RARITY_XP
 from data.trivia import TriviaManager
 from data.users import FameUser
-from formatting import get_base_embed, get_title_embed, get_booster_embed, get_streak_embed, get_firedust_embed
+from formatting import get_base_embed, get_title_embed, get_booster_embed, get_streak_embed, get_firedust_embed, \
+    get_maxed_titles_embed
 from utils import sort_dict, alpha2_to_country, country_to_alpha2, ALTERNATIVE_CNAMES, incr_symbol, \
     millify, get_rank_symbol, CONTINENT_CODE_TO_NAME, points_per_capita, country_to_continent, format_country_ranking, \
     format_cname, POINTS, VOTES, CTYPES, ALPHA2_COUNTRIES, format_user_ranking
@@ -34,7 +36,8 @@ from utils import sort_dict, alpha2_to_country, country_to_alpha2, ALTERNATIVE_C
 class FameBot:
     def __init__(self, cooldown: float = 5, daily_votes: int = 30, recap_scopes: List[str] = None,
                  leaderboard_topics: List[str] = None, upload_images: bool = False, min_daily_votes: int = 30,
-                 daily_boost_count: int = 5, daily_boost_factor: float = 1):
+                 daily_boost_count: int = 5, daily_boost_factor: float = 1, max_equipped_titles: int = 5,
+                 title_daily_limit: int = 100):
         if recap_scopes is None:
             self.visible_recap_scopes = ['daily', 'weekly', 'seasonal']
             self.recap_scopes = self.visible_recap_scopes + ['alltime']
@@ -52,6 +55,8 @@ class FameBot:
         self.min_daily_votes = min_daily_votes
         self.daily_boost_count = daily_boost_count
         self.daily_boost_factor = daily_boost_factor
+        self.max_equipped_titles = max_equipped_titles
+        self.title_daily_limit = title_daily_limit
 
         self.bot: Bot | None = None
         self.title_roles = None
@@ -421,8 +426,10 @@ class FameBot:
         vote_args = {'embeds': []}
         active_booster = fame_user.active_booster
         symbol_str = ''
+        if alpha2 in self.daily_boosted_countries:
+            symbol_str += ':sunny:'
         if active_booster is not None:
-            symbol_str = active_booster.symbol + ' '
+            symbol_str += active_booster.symbol + ' '
 
         old_role = fame_user.get_role(self.progression_roles)
         points_gained, xp_gained = self.do_vote(self.get_user(user.id), alpha2, 1)
@@ -432,10 +439,17 @@ class FameBot:
         vote_count, point_count, vote_rank, points_rank = self.get_country_stats(alpha2)
         user_rank = list(self.get_top_users().keys()).index(fame_user.user_id) + 1
 
+        maxed_titles_embed = None
+        maxed_titles = [title for title in fame_user.titles if title.daily_votes == self.title_daily_limit]
+        if maxed_titles:
+            maxed_titles_embed = get_maxed_titles_embed(maxed_titles)
+
         embed = get_base_embed(
             user, title=f'{symbol_str}Vote for {format_cname(alpha2, c_name)} registered! ({incr_symbol(points_gained)}{millify(points_gained)} pt.)'
         )
-        if active_booster is not None:
+        if alpha2 in self.daily_boosted_countries:
+            embed.colour = discord.Colour.yellow()
+        elif active_booster is not None:
             embed.colour = active_booster.color
         left_duration = fame_user.active_booster.left_duration if fame_user.has_active_booster else 0
         embed.add_field(name='Country stats',
@@ -448,20 +462,7 @@ class FameBot:
                               (f'\nBooster duration: {active_booster.left_duration} -> {left_duration}' if active_booster is not None else ''),
                         inline=True)
 
-        if self.upload_images:
-            if get_banner_path(alpha2).exists():
-                banner = get_banner(alpha2)
-                embed.set_image(url=f'attachment://{alpha2}.jpg')
-                vote_args['file'] = banner
-            else:
-                flag = get_flag(alpha2)
-                embed.set_image(url=f'attachment://{alpha2}.jpg')
-                vote_args['file'] = flag
-        else:
-            if get_banner_path(alpha2).exists():
-                embed.set_image(url=f'https://raw.githubusercontent.com/DwarflinDeveloping/FameBot/refs/heads/master/banners/{alpha2}.jpg')
-            else:
-                embed.set_thumbnail(url=f'https://raw.githubusercontent.com/DwarflinDeveloping/FameBot/refs/heads/master/flags/{alpha2}.png')
+        format_embed(vote_args, embed, alpha2, True, active_booster)
 
         class VoteView(ui.View):
             @staticmethod
@@ -519,7 +520,7 @@ class FameBot:
                         break
 
         vote_args['embeds'].append(embed)
-        for embed in [booster_embed, title_embed, quest_embed, dust_embed]:
+        for embed in [booster_embed, title_embed, quest_embed, dust_embed, maxed_titles_embed]:
             if embed is not None:
                 vote_args['embeds'].append(embed)
         if role_up:
@@ -625,7 +626,7 @@ class FameBot:
             descr = f'Total gain from titles: {fame_user.title_xp_incr}xp (20xp -> {20 + fame_user.title_xp_incr}xp)'
         else:
             descr = 'You don\'t have any titles yet! Keep voting to gain some.'
-        embed = get_base_embed(ctx.user, 'Your titles', description=descr)
+        embed = get_base_embed(ctx.user, 'Your Titles', description=descr)
 
         for rarity, role_list in self.title_roles.items():
             txt, example_title = '', None
@@ -689,55 +690,89 @@ class FameBot:
             kwargs['view'] = UpgradeSelection()
         return kwargs
 
-    def title_upgrade_args(self, ctx: ApplicationContext | Interaction):
+    def title_equip_args(self, ctx: ApplicationContext | Interaction):
         fame_user = self.get_user(ctx.user.id)
-        embed = get_base_embed(ctx.user, ':speech_balloon: Title Upgrades')
-
-        embed.add_field(name='Your Firedust',
-                        value=f'**{fame_user.total_firedust} :sparkles: Firedust**',
-                        inline=False)
+        embed = get_base_embed(ctx.user, ':shield: Equipped Titles',
+                               description='Equip titles to earn one **:coin: BotCoin** per vote.\n'
+                                           f'Each title can give a daily maximum of {self.title_daily_limit} :coin: BotCoins.\n'
+                                           f'Purse: **{fame_user.total_coins} :coin: BotCoins**')
+        equipped_titles = list(fame_user.equipped_titles)
 
         for title in fame_user.titles:
-            embed.add_field(name=title.name,
-                            value=f'Level: {title.leveling}\n' \
-                                  f'Upgrade Cost: **{title.upgrade_cost} :sparkles: Firedust**' if not title.is_maxed else ':x: Title is maxed out',
+            is_maxed = title.daily_votes >= self.title_daily_limit
+            embed.add_field(name=(':white_check_mark: ' if title.is_equipped else ':x: ') + title.name,
+                            value=f'Daily votes: {title.daily_votes}/{self.title_daily_limit}' + (' **Maxed!**' if is_maxed else ''),
                             inline=False)
 
-        class BoosterSelect(discord.ui.View):
-            @discord.ui.select(
-                options=[discord.SelectOption(label=b.name, emoji=b.symbol) for b in boosters if b.firedust_cost],
-                placeholder='Select a booster to purchase',
-                max_values=1,
-                min_values=1
-            )
-            async def select_callback(self2, select: ui.Select, interaction: Interaction):
-                if interaction.user.id != fame_user.user_id:
-                    await interaction.respond(
-                        embed=get_base_embed(interaction.user, f'This is {ctx.user.name}\'s booster menu! Make your own one using /boosters', error=True),
-                        ephemeral=True
-                    )
-                    return
+        class EquipView(ui.View):
+            def __init__(self2):
+                super().__init__(timeout=None)
+                self2.equipped_titles = equipped_titles
+                self2.fame_user = fame_user
+                self2.ctx = ctx
 
-                boo = Booster.from_name(select.values[0])()
-                if fame_user.total_firedust < boo.firedust_cost:
-                    await interaction.respond(
-                        embed=get_base_embed(interaction.user,
-                                             f'You need **{boo.firedust_cost} :sparkles: Firedust** to purchase one {boo.formatted_name}',
-                                             error=True),
-                        ephemeral=True
-                    )
-                    return
+                # Disequip buttons for currently equipped titles
+                for i, t in enumerate(self2.equipped_titles):
+                    btn = ui.Button(label=t.name, style=ButtonStyle.red, custom_id=f'disequip_{i}')
 
-                fame_user.purchase_booster(boo)
-                emb = get_base_embed(
-                    interaction.user,
-                    title=f'{boo.symbol} You have purchased a {boo.name}!',
-                    description=f'Active boosters using **/boosters**.',
-                    colour=boo.color
-                )
-                await interaction.respond(embed=emb)
+                    async def disequip_btn(interaction: Interaction, title_name=t.name):
+                        if not self2.fame_user.get_title(title_name).is_equipped:
+                            await interaction.response.send_message(
+                                embed=get_base_embed(self2.ctx.user, f'Not equipped!',
+                                                     description=f'This title is no longer equipped', error=True),
+                                ephemeral=True
+                            )
+                            return
+                        self2.fame_user.equip_title(title_name, False)
+                        disequipped_title = self2.fame_user.get_title(title_name)
+                        await interaction.response.send_message(embed=get_base_embed(
+                            self2.ctx.user, f'{disequipped_title.name} disequipped',
+                            description='Equip a new title in the free slot to gain more **:coin: BotCoins**'
+                        ))
+                        await self2.ctx.edit(**self.title_equip_args(self2.ctx))
 
-        return {'embed': embed, 'view': BoosterSelect()}
+                    btn.callback = disequip_btn
+                    self2.add_item(btn)
+
+                # Equip buttons for unequipped titles
+                for i, t in enumerate(
+                        [user_title for user_title in self2.fame_user.titles if not user_title.is_equipped and user_title.is_equipable]):
+                    btn = ui.Button(label=t.name, style=ButtonStyle.green, custom_id=f'equip_{i}')
+
+                    async def equip_btn(interaction: Interaction, title_name=t.name):
+                        if len(self2.equipped_titles) >= self.max_equipped_titles:
+                            await interaction.response.send_message(
+                                embed=get_base_embed(self2.ctx.user, f'Too many equipped titles!',
+                                                     description=f'You can\'t equip more than {self.max_equipped_titles} titles at a time!',
+                                                     error=True),
+                                ephemeral=True
+                            )
+                            return
+                        elif self2.fame_user.get_title(title_name).is_equipped:
+                            await interaction.response.send_message(
+                                embed=get_base_embed(self2.ctx.user, f'Already equipped!',
+                                                     description=f'You already have this title equipped.',
+                                                     error=True),
+                                ephemeral=True
+                            )
+                            return
+                        self2.fame_user.equip_title(title_name, True)
+                        equipped_title = self2.fame_user.get_title(title_name)
+                        await interaction.response.send_message(embed=get_base_embed(
+                            self2.ctx.user, f'{equipped_title.formatted_rarity} Title {equipped_title.name} equipped!',
+                            description='You will gain **:coin: BotCoins** from voting with this title.'
+                        ))
+                        await self2.ctx.edit(**self.title_equip_args(self2.ctx))
+
+                    btn.callback = equip_btn
+                    self2.add_item(btn)
+
+
+
+        kwargs = {'embed': embed}
+        if list(fame_user.titles):
+            kwargs['view'] = EquipView()
+        return kwargs
 
     def booster_shop_args(self, ctx: ApplicationContext | Interaction):
         fame_user = self.get_user(ctx.user.id)
@@ -794,7 +829,9 @@ class FameBot:
 
     async def check_permissions(self, ctx: ApplicationContext | Interaction, admin_only: bool) -> bool:
         is_admin = ctx.user.id in self.admin_ids
-        if admin_only and not is_admin:
+        if self.title_roles is None:
+            description = ':hourglass: The bot is not yet ready...'
+        elif admin_only and not is_admin:
             description = ':no_entry_sign: You need to be Admin to use this command!'
         elif self.on_maintenance and ctx.user.id not in self.admin_ids:
             description = ':tools: The bot is currently under maintenance.'
@@ -832,7 +869,7 @@ class FameBot:
             elif role not in present_roles and role in wanted_roles:
                 await user.add_roles(role)
                 if role_id in self.progression_roles.values():  # is progression role
-                    await channel.send(f'{ctx.user.mention} has reached **Lvl. {fame_user.level}**! You are now a {role.name}!')
+                    await channel.send(f'{ctx.user.mention} has reached seasonal **Lvl. {fame_user.level}**! You are now a {role.name}!')
                 elif role_id == 1365849684177981621:
                     await channel.send(f'{ctx.user.mention} has reached **10,000 votes**! You have been awarded {role.name}')
 
@@ -860,6 +897,7 @@ class FameBot:
             user.daily_votes = 0
 
             user.reset_daily_quests(self.trivia, 5, list(self.titles))
+            user.reset_daily_votes()
 
             user.save()
 
@@ -1185,6 +1223,18 @@ class FameBot:
                 user.reset_daily_quests(self.trivia, 5, list(self.titles))
 
         @self.bot.slash_command(
+            name='reset_title_votes',
+            guild_ids=self.admin_guilds
+        )
+        @default_permissions(administrator=True)
+        async def gen_giveaway_cmd(ctx: ApplicationContext):
+            if not await self.check_permissions(ctx, True):
+                return
+
+            for user in self.users:
+                user.reset_daily_votes()
+
+        @self.bot.slash_command(
             name='resolve_giveaway',
             guild_ids=self.admin_guilds
         )
@@ -1220,6 +1270,7 @@ class FameBot:
                     for user in self.users:
                         user.daily_votes = 0
                         user.reset_daily_quests(self.trivia, 5, list(self.titles))
+                        user.reset_daily_votes()
                         user.save()
             clear_database(**kwargs)
 
@@ -1578,15 +1629,25 @@ class FameBot:
 
             await ctx.respond(view=ConfirmationView(), embed=confirmation_embed, ephemeral=True)
 
-        @self.bot.slash_command(
-            name='titles',
-            description='View your title collection'
+        @title_cmds.command(
+            name='upgrade',
+            description='View and upgrade your title collection'
         )
         async def titles_cmd(ctx: ApplicationContext):
             if not await self.check_permissions(ctx, False):
                 return
 
             await ctx.respond(**self.title_args(ctx))
+
+        @title_cmds.command(
+            name='equip',
+            description='View and manage your equipped titles'
+        )
+        async def titles_cmd(ctx: ApplicationContext):
+            if not await self.check_permissions(ctx, False):
+                return
+
+            await ctx.respond(**self.title_equip_args(ctx))
 
         @self.bot.slash_command(
             name='quests',
@@ -1635,7 +1696,7 @@ class FameBot:
         self.bot.add_application_command(top_cmds)
         self.bot.add_application_command(user_cmds)
         self.bot.add_application_command(booster_cmds)
-        # self.bot.add_application_command(title_cmds)
+        self.bot.add_application_command(title_cmds)
 
         @self.bot.listen(once=True)
         async def on_ready():
@@ -1702,7 +1763,7 @@ class FameBot:
                 if any([title['name'] == title_name for title in user_data[user.id]['titles']]):
                     user_data[user.id]['titles'][[title['name'] == title_name for title in user_data[user.id]['titles']].index(True)]['amount_found'] += 1
                 else:
-                    user_data[user.id]['titles'].append({'rarity': title_rarity, 'name': title_name, 'amount_found': 1})
+                    user_data[user.id]['titles'].append({'rarity': title_rarity, 'name': title_name, 'amount_found': 1, 'is_equipped': False})
 
         for user_id, udata in user_data.items():
             Path('users5755762', f'{user_id}.json').write_text(json.dumps(udata, indent=2))
