@@ -698,7 +698,7 @@ class FameBot:
                                            f'Purse: **{fame_user.total_coins} :coin: BotCoins**')
         equipped_titles = list(fame_user.equipped_titles)
 
-        for title in fame_user.titles:
+        for title in fame_user.equipped_titles:
             is_maxed = title.daily_votes >= self.title_daily_limit
             embed.add_field(name=(':white_check_mark: ' if title.is_equipped else ':x: ') + title.name,
                             value=f'Daily votes: {title.daily_votes}/{self.title_daily_limit}' + (' **Maxed!**' if is_maxed else ''),
