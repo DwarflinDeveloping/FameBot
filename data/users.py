@@ -260,9 +260,7 @@ class FameUser:
     @property
     def titles(self) -> Iterator[Title]:
         for title_data in self.data['titles']:
-            yield Title(title_data['name'], title_data['rarity'], title_data['leveling'], title_data['amount_found'],
-                        title_data['is_equipped'], title_data['daily_votes'], title_data['alltime_votes'],
-                        title_data['coin_balance'], title_data['last_used'])
+            yield Title(**title_data)
 
     @property
     def daily_quests(self) -> Iterator[DailyQuest]:
