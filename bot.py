@@ -869,7 +869,7 @@ class FameBot:
             elif role not in present_roles and role in wanted_roles:
                 await user.add_roles(role)
                 if role_id in self.progression_roles.values():  # is progression role
-                    await channel.send(f'{ctx.user.mention} has reached seasonal **Lvl. {fame_user.current_leveling}**! You are now a {role.name}!')
+                    await channel.send(f'{ctx.user.mention} has reached seasonal **Lvl. {fame_user.current_level}**! You are now a {role.name}!')
                 elif role_id == 1365849684177981621:
                     await channel.send(f'{ctx.user.mention} has reached **10,000 votes**! You have been awarded {role.name}')
 
@@ -1504,8 +1504,8 @@ class FameBot:
                                   f'(From Season 1: {fame_user.season_1_level} Levels)',
                             inline=True)
             embed.add_field(name='Available Firedust', value=str(fame_user.total_firedust), inline=False)
-            embed.add_field(name='Total votes', value=str(fame_user.total_votes), inline=True)
-            embed.add_field(name='Total points', value=str(fame_user.total_points), inline=True)
+            embed.add_field(name='Total votes', value=millify(fame_user.total_votes), inline=True)
+            embed.add_field(name='Total points', value=millify(fame_user.total_points), inline=True)
             embed.add_field(name='Daily streak',
                             value=f'Current streak: {fame_user.daily_streak}\n'
                                   f'Reached today? {"**yes**" if fame_user.daily_votes >= self.min_daily_votes else f"**no**, do {self.min_daily_votes - fame_user.daily_votes} more votes"}',
