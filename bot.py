@@ -716,6 +716,15 @@ class FameBot:
                     btn = ui.Button(label=t.name, style=ButtonStyle.red, custom_id=f'disequip_{i}')
 
                     async def disequip_btn(interaction: Interaction, title_name=t.name):
+                        if interaction.user.id != fame_user.user_id:
+                            await interaction.respond(
+                                embed=get_base_embed(interaction.user,
+                                                     f'This is {ctx.user.name}\'s title menu! Make your own one using **/titles equip**',
+                                                     error=True),
+                                ephemeral=True
+                            )
+                            return
+
                         if not self2.fame_user.get_title(title_name).is_equipped:
                             await interaction.response.send_message(
                                 embed=get_base_embed(self2.ctx.user, f'Not equipped!',
@@ -740,6 +749,14 @@ class FameBot:
                     btn = ui.Button(label=t.name, style=ButtonStyle.green, custom_id=f'equip_{i}')
 
                     async def equip_btn(interaction: Interaction, title_name=t.name):
+                        if interaction.user.id != fame_user.user_id:
+                            await interaction.respond(
+                                embed=get_base_embed(interaction.user,
+                                                     f'This is {ctx.user.name}\'s title menu! Make your own one using **/titles equip**',
+                                                     error=True),
+                                ephemeral=True
+                            )
+                            return
                         if len(self2.equipped_titles) >= self.max_equipped_titles:
                             await interaction.response.send_message(
                                 embed=get_base_embed(self2.ctx.user, f'Too many equipped titles!',
