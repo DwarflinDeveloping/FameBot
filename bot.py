@@ -698,7 +698,7 @@ class FameBot:
                                            f'Purse: **{fame_user.total_coins} :coin: BotCoins**')
         equipped_titles = list(fame_user.equipped_titles)
 
-        for title in fame_user.equipped_titles:
+        for title in [title for title in fame_user.titles if title.is_equipable]:
             is_maxed = title.daily_votes >= self.title_daily_limit
             embed.add_field(name=(':white_check_mark: ' if title.is_equipped else ':x: ') + title.name,
                             value=f'Daily votes: {title.daily_votes}/{self.title_daily_limit}' + (' **Maxed!**' if is_maxed else ''),
@@ -873,7 +873,8 @@ class FameBot:
                 elif role_id == 1365849684177981621:
                     await channel.send(f'{ctx.user.mention} has reached **10,000 votes**! You have been awarded {role.name}')
 
-        self.role_checks.remove(fame_user.user_id)
+        if fame_user.user_id in self.role_checks:
+            self.role_checks.remove(fame_user.user_id)
 
     async def check_streak(self, ctx: ApplicationContext | Interaction, fame_user: FameUser) -> None:
         if fame_user.daily_votes != self.min_daily_votes:
@@ -1193,6 +1194,28 @@ class FameBot:
             to_user.add_booster(booster_cls, amount)
 
             await ctx.respond(embed=get_base_embed(ctx.author, f'Gifted {amount}x {booster} to {recipient.display_name}'))
+
+        @gift_cmds.command(
+            name='title',
+            description='Gift a title to another user'
+        )
+        async def gift_xp_cmd(ctx: ApplicationContext, recipient: User, role: Role, amount: Optional[int]):
+            if not await self.check_permissions(ctx, True):
+                return
+            if amount is None:
+                amount = 1
+
+            from_user, to_user = self.get_user(ctx.user.id), self.get_user(recipient.id)
+            title = None
+            for raw_title in self.titles:
+                if raw_title.name == role.name:
+                    title = raw_title
+            if title is None:
+                raise AssertionError
+
+            to_user.increase_found_titles(title, amount)
+
+            await ctx.respond(embed=get_base_embed(ctx.author, f'Gifted {amount}x {title} to {recipient.display_name}'))
 
         @self.bot.slash_command(
             name='gen_giveaway',
