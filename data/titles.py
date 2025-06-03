@@ -36,7 +36,7 @@ RARITY_CHANCES = {
     'SPECIAL': 0
 }
 
-@dataclasses.dataclass()
+@dataclasses.dataclass(unsafe_hash=True)
 class Title:
     name: str
     rarity: RARITIES

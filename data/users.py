@@ -53,8 +53,8 @@ class FameUser:
         self.file_path.write_text(json.dumps(self.data, indent=2))
 
     def update_legacy(self) -> None:
-        if self.total_votes > 0 and self.vote_xp == 0:
-            self.vote_xp = self.total_votes * 10
+        # if self.total_votes > 0 and self.vote_xp == 0:
+        #     self.vote_xp = self.total_votes * 10
 
         if 'additional_xp' in self.data:
             self.additional_xp = self.data['additional_xp']
@@ -87,19 +87,17 @@ class FameUser:
             else:
                 title_names.append(title['name'])
 
-        if 'title_update' not in self.data['claims']:
+        if 'season1_transferred' not in self.data['claims']:
             self.data['titles'] = []  # resetting titles
-
             self.data['firedust']['title_dupl'] = floor(self.data['leveling']['title_dupl_xp'] / 40)
             self.data['leveling']['title_dupl_xp'] = 0
-            self.data['claims'].append('title_update')
 
-        if 'season1_transferred' not in self.data['claims']:
             for key, val in self.data['leveling'].items():
                 if key.startswith('season'):
                     continue
                 self.data['leveling']['season_1'][key] = deepcopy(val)
                 self.data['leveling'][key] = 0
+
             self.data['claims'].append('season1_transferred')
 
 
@@ -525,6 +523,10 @@ class FameUser:
     @property
     def current_leveling(self) -> float:
         return self.leveling_by_xp(self.current_xp)
+
+    @property
+    def current_level(self) -> float:
+        return floor(self.leveling_by_xp(self.current_xp))
 
     @property
     def season_1_level(self) -> int:

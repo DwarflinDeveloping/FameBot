@@ -869,7 +869,7 @@ class FameBot:
             elif role not in present_roles and role in wanted_roles:
                 await user.add_roles(role)
                 if role_id in self.progression_roles.values():  # is progression role
-                    await channel.send(f'{ctx.user.mention} has reached seasonal **Lvl. {fame_user.level}**! You are now a {role.name}!')
+                    await channel.send(f'{ctx.user.mention} has reached seasonal **Lvl. {fame_user.current_leveling}**! You are now a {role.name}!')
                 elif role_id == 1365849684177981621:
                     await channel.send(f'{ctx.user.mention} has reached **10,000 votes**! You have been awarded {role.name}')
 
