@@ -440,7 +440,7 @@ class FameBot:
         user_rank = list(self.get_top_users().keys()).index(fame_user.user_id) + 1
 
         maxed_titles_embed = None
-        maxed_titles = [title for title in fame_user.titles if title.daily_votes == self.title_daily_limit]
+        maxed_titles = [title for title in fame_user.equipped_titles if title.daily_votes == self.title_daily_limit]
         if maxed_titles:
             maxed_titles_embed = get_maxed_titles_embed(maxed_titles)
 
