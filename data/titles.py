@@ -40,7 +40,7 @@ RARITY_CHANCES = {
     'LEGENDARY': .0005,
     'DIVINE': .0002,
     'SPECIAL': 0,
-    'SEASONAL': .95035
+    'SEASONAL': .00035
 }
 
 @dataclasses.dataclass(unsafe_hash=True)
