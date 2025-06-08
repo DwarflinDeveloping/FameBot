@@ -4,7 +4,7 @@ from typing import Literal
 
 from discord import Color
 
-RARITIES = Literal['COMMON', 'RARE', 'SUPER_RARE', 'MYTHIC', 'LEGENDARY', 'DIVINE', 'SPECIAL']
+RARITIES = Literal['COMMON', 'RARE', 'SUPER_RARE', 'MYTHIC', 'LEGENDARY', 'DIVINE', 'SPECIAL', 'SEASONAL']
 
 RARITY_COLORS = {
     'COMMON': Color.greyple(),
@@ -13,7 +13,8 @@ RARITY_COLORS = {
     'MYTHIC': Color.fuchsia(),
     'LEGENDARY': Color.gold(),
     'DIVINE': Color.dark_gold(),
-    'SPECIAL': Color.dark_purple()
+    'SPECIAL': Color.dark_purple(),
+    'SEASONAL': Color.yellow()
 }
 
 RARITY_XP = {
@@ -23,7 +24,12 @@ RARITY_XP = {
     'MYTHIC': 4,
     'LEGENDARY': 5,
     'DIVINE': 8,
-    'SPECIAL': 8
+    'SPECIAL': 8,
+    'SEASONAL': 0
+}
+
+RARITY_POINTS = {
+    'SEASONAL': 0
 }
 
 RARITY_CHANCES = {
@@ -33,7 +39,8 @@ RARITY_CHANCES = {
     'MYTHIC': .0010,
     'LEGENDARY': .0005,
     'DIVINE': .0002,
-    'SPECIAL': 0
+    'SPECIAL': 0,
+    'SEASONAL': .95035
 }
 
 @dataclasses.dataclass(unsafe_hash=True)
@@ -78,16 +85,20 @@ class Title:
         return RARITY_COLORS.get(self.rarity, None)
 
     @property
-    def xp_incr(self) -> int:
-        return RARITY_XP.get(self.rarity, 0) * self.leveling
+    def xp_incr(self) -> float:
+        return RARITY_XP.get(self.rarity, 0) * (1 + self.leveling * 1/2)
+
+    @property
+    def points_factor(self) -> float:
+        return RARITY_POINTS.get(self.rarity, 1)
 
     @property
     def is_upgradable(self):
-        return self.rarity != 'SPECIAL'
+        return self.rarity not in ('SPECIAL', 'SEASONAL')
 
     @property
     def is_equipable(self):
-        return self.rarity != 'SPECIAL'
+        return self.rarity not in ('SPECIAL', 'SEASONAL')
 
     @property
     def upgrade_cost(self) -> int:
@@ -99,7 +110,7 @@ class Title:
 
     @property
     def is_maxed(self):
-        return self.leveling >= 10
+        return self.leveling >= 15
 
     @property
     def spawn_chance(self) -> float:

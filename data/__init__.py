@@ -12,7 +12,8 @@ COUNTRY_DATA_PRESET = {country.alpha_2: PV_PRESET.copy() for country in pycountr
 GAME_DATA_PRESET = {
     'maintenance': False,
     'daily_giveaway': None,
-    'daily_boosted_countries': None
+    'daily_boosted_countries': None,
+    'seasonal_quests': {}
 }
 
 APP_DATA_PRESET = {
@@ -53,7 +54,8 @@ APP_DATA_PRESET = {
         'MYTHIC': [1365953216315002880, 1365953915136249886, 1365952821777928232],     # Mythic 0.5%
         'LEGENDARY': [1365850043625504849, 1368981799547437107, 1365849826285060207],  # Legendary 0.2%
         'DIVINE': [1370017915457372270, 1370018573619167252, 1370018056402636990],  # Legendary 0.2%
-        'SPECIAL': [1365849684177981621, 1370548249831931934]
+        'SPECIAL': [1365849684177981621, 1370548249831931934],
+        'SEASONAL': [1381275271121866916]
     },
     'recap_channels': {
         'daily': 1363171417612353658,

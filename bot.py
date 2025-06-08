@@ -21,6 +21,7 @@ from data import load_app_data, save_game_data, flags_dir, users_dir, clear_data
     PV_PRESET, make_dirs, load_game_data, save_app_data
 from data.boosters import RoleUpBooster, Booster, boosters, booster_names, booster_name_to_cls
 from data.prices.giveaways import Giveaway, StreakReward
+from data.prices.quests import S2_W1_DATA
 from data.recaps import save_data, FameRecap
 from data.resources import get_legacy_path, get_legacy_banner, get_flag, format_embed
 from data.titles import RARITY_CHANCES, Title, RARITY_XP
@@ -114,6 +115,18 @@ class FameBot:
         if giveaway is None:
             return None
         return Giveaway.from_dict(giveaway)
+
+    @daily_giveaway.setter
+    def daily_giveaway(self, value: Giveaway) -> None:
+        self.game_data['daily_giveaway'] = dict(value) if value is not None else None
+        self.save_game_data()
+
+    @property
+    def seasonal_quests(self) -> Dict[str, dict]:
+        return self.game_data['seasonal_quests']
+
+    def update_seasonal_quests(self, quest_id: str, value: dict) -> None:
+        self.game_data['seasonal_quests'][quest_id] = value
 
     @daily_giveaway.setter
     def daily_giveaway(self, value: Giveaway) -> None:
@@ -360,12 +373,12 @@ class FameBot:
         embed = get_booster_embed(booster)
         return embed
 
-    def do_vote(self, user: FameUser, alpha2: str, votes_count: int, booster_applies: bool = True,
-                gives_xp: bool = True) -> Tuple[int, int]:
+    def do_vote(self, user: FameUser, alpha2: str, votes_count: int, flare_applies: bool = True,
+                booster_applies: bool = True, gives_xp: bool = True) -> Tuple[int, int]:
         prev_order = (self.get_order(POINTS), self.get_order(VOTES))
         old_level = user.level
 
-        points_gained, xp_gained = user.do_vote(votes_count, alpha2, self.daily_boosted_countries, self.daily_boost_factor, booster_applies, gives_xp)
+        points_gained, xp_gained = user.do_vote(votes_count, alpha2, self.daily_boosted_countries, self.daily_boost_factor, flare_applies, booster_applies, gives_xp)
 
         for scope in self.recap_scopes:
             recap = self.get_recap(scope)
@@ -569,6 +582,23 @@ class FameBot:
 
         return {'embed': embed, 'view': DetailView()}
 
+    def update_seasonal_quest_embed(self, seasonal_id: str, embed: Embed) -> Embed:
+        title, descr, needed = S2_W1_DATA.get(seasonal_id)
+        progress = self.seasonal_quests[seasonal_id]
+        embed.add_field(
+            name=title,
+            value=f'{descr}\n'
+                  f'Progress: {progress}/{needed}' + ('' if not progress>=needed else ' **Finished!**'),
+            inline=False
+        )
+        return embed
+
+    def seasonal_quest_args(self, ctx: ApplicationContext | Interaction):
+        embed = get_base_embed(ctx.author, ':sun: Seasonal Quests: Week 1')
+        for seasonal_id in self.seasonal_quests:
+            embed = self.update_seasonal_quest_embed(seasonal_id, embed)
+        return {'embed': embed}
+
     def activate_booster_args(self, ctx: ApplicationContext | Interaction):
         fame_user = self.get_user(ctx.user.id)
         fame_user.check_starter_booster()
@@ -608,6 +638,10 @@ class FameBot:
                         return
                     boo = Booster.from_name(select.values[0])()
                     fame_user.activate_booster(boo)
+
+                    if 'firepower_master' in self.seasonal_quests and boo.name == 'Masters Firepower':
+                        self.seasonal_quests['firepower_master'] += 1
+
                     emb = get_base_embed(
                         interaction.user,
                         title=f'{boo.symbol} You have activated a {boo.name}!',
@@ -686,7 +720,7 @@ class FameBot:
                 await interaction.respond(embed=emb)
 
         kwargs = {'embed': embed}
-        if len(list(fame_user.titles)) > 0:
+        if len(list(fame_user.titles)) > 0 and any(title.is_upgradable for title in fame_user.titles):
             kwargs['view'] = UpgradeSelection()
         return kwargs
 
@@ -833,6 +867,8 @@ class FameBot:
                     )
                     return
 
+                if 'firedust_shop' in self.seasonal_quests:
+                    self.seasonal_quests['firedust_shop'] += boo.firedust_cost
                 fame_user.purchase_booster(boo)
                 emb = get_base_embed(
                     interaction.user,
@@ -930,9 +966,6 @@ class FameBot:
         await self.giveaway_channel.send(embed=embed)
 
     async def create_daily_boost(self) -> None:
-        giveaway = Giveaway.generate(list(self.titles))
-        self.daily_giveaway = giveaway
-
         countries = random.choices(ALPHA2_COUNTRIES, k=self.daily_boost_count)
         countries_str = '\n'.join([f'- {format_cname(alpha2, alpha2_to_country(alpha2))}' for alpha2 in countries])
         self.daily_boosted_countries = countries
@@ -1243,6 +1276,14 @@ class FameBot:
             await self.create_giveaway()
 
         @self.bot.slash_command(
+            name='gen_seasonal_quests',
+            guild_ids=self.admin_guilds
+        )
+        @default_permissions(administrator=True)
+        async def gen_seasonal_quests_cmd(ctx: ApplicationContext):
+            self.game_data['seasonal_quests'] = {key: 0 for key in S2_W1_DATA.keys()}
+
+        @self.bot.slash_command(
             name='gen_flare',
             guild_ids=self.admin_guilds
         )
@@ -1472,7 +1513,11 @@ class FameBot:
                 return
 
             fame_user = self.get_user(ctx.author.id)
-            points_gained, xp_gained = self.do_vote(fame_user, alpha2, self.daily_votes, False, False)
+            points_gained, xp_gained = self.do_vote(fame_user, alpha2, self.daily_votes, True, False, False)
+
+            if 'sunbather' in self.seasonal_quests and alpha2 in self.daily_boosted_countries:
+                self.seasonal_quests['sunbather'] += 1
+
             # if ctx.author.id not in self.users_role_checked:
             await self.check_roles(ctx, fame_user)
 
@@ -1698,6 +1743,16 @@ class FameBot:
                 return
 
             await ctx.respond(**self.quest_args(ctx))
+
+        @self.bot.slash_command(
+            name='seasonal_quests',
+            description='View the current seasonal quests'
+        )
+        async def seasonal_quests_cmd(ctx: ApplicationContext):
+            if not await self.check_permissions(ctx, False):
+                return
+
+            await ctx.respond(**self.seasonal_quest_args(ctx))
 
         @self.bot.slash_command(
             name='help',

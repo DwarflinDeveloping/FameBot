@@ -381,3 +381,9 @@ class LetterQuest(DailyQuest):
 
 daily_quests = IslandQuest, LandlockedQuest, MicroQuest, AmericasQuest, ContinentQuest, CountryQuest, ReligionQuest, \
                EUQuest, WarQuest, DesertQuest, LetterQuest, PolarQuest, CoastlineQuest
+
+S2_W1_DATA = {
+    'sunbather': (':sunrise: Sunbather', 'Use the /daily command 20 times on countries affected by the **Solar Flare**', 20),
+    'firedust_shop': (':sparkles: Shopping Spree', 'Purchase boosters worth 5,000 :sparkles: Fire Dust', 5000),
+    'firepower_master': (':thunder_cloud_rain: Master of Disaster', 'Use 10 Masters Firepowers', 10),
+}

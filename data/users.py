@@ -2,7 +2,7 @@ import asyncio
 import dataclasses
 import json
 from copy import deepcopy
-from math import floor
+from math import floor, prod
 from pathlib import Path
 from random import sample
 from time import time
@@ -398,18 +398,18 @@ class FameUser:
         self.data['last_booster'] = value
 
     def do_vote(self, vote_count: int, alpha2: str, daily_boosted_countries: List[str], daily_boost_factor: float,
-                booster_applies: bool = True, gives_xp: bool = True, ) -> Tuple[int, int]:
+                flare_applies: bool = True, booster_applies: bool = True, gives_xp: bool = True, ) -> Tuple[int, int]:
 
         points_gained, xp_gained = 0, 0
         for _ in range(vote_count):
             points_incr = self.points_per_vote
             xp_incr = self.xp_per_vote if gives_xp else 0
 
-            if booster_applies:  # boosters, titles, solar flare
-                booster = self.active_booster
+            if flare_applies and alpha2 in daily_boosted_countries:
+                points_incr *= 1 + daily_boost_factor
 
-                if alpha2 in daily_boosted_countries:
-                    points_incr *= 1 + daily_boost_factor
+            if booster_applies:
+                booster = self.active_booster
 
                 if self.has_active_booster:
                     points_incr *= 1 + booster.boost
@@ -484,16 +484,16 @@ class FameUser:
         self.next_vote = time() + cooldown
 
     @property
-    def season_1_xp(self):
+    def season_1_xp(self) -> float:
         return sum(list(self.data['leveling']['season_1'].values()))
 
     @property
-    def current_xp(self):
+    def current_xp(self) -> float:
         return self.start_xp + self.vote_xp + self.giveaway_xp + self.quest_xp + self.gift_xp + self.title_dupl_xp + \
                self.additional_xp
 
     @property
-    def lifetime_xp(self):
+    def lifetime_xp(self) -> float:
         return self.current_xp + self.season_1_xp
 
     @property
@@ -511,7 +511,7 @@ class FameUser:
             xp_threshold *= 1 + self.xp_leveling_factor
         return xp_threshold
 
-    def leveling_by_xp(self, xp: int) -> float:
+    def leveling_by_xp(self, xp: float) -> float:
         level = 0
         xp_threshold = self.start_xp  # XP required for level 1
         while xp >= xp_threshold:
@@ -552,8 +552,12 @@ class FameUser:
         return floor(self.leveling)
 
     @property
+    def title_points_factor(self) -> float:
+        return prod([title.points_factor for title in self.titles])
+
+    @property
     def points_per_vote(self) -> int:
-        return self.level
+        return floor(self.level * self.title_points_factor)
 
     @property
     def title_xp_incr(self) -> int:
