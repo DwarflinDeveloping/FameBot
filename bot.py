@@ -24,7 +24,7 @@ from data.prices.giveaways import Giveaway, StreakReward
 from data.prices.quests import S2_W1_DATA
 from data.recaps import save_data, FameRecap
 from data.resources import get_legacy_path, get_legacy_banner, get_flag, format_embed
-from data.titles import RARITY_CHANCES, Title, RARITY_XP
+from data.titles import RARITY_CHANCES, Title, RARITY_XP, RARITY_POINTS
 from data.trivia import TriviaManager
 from data.users import FameUser
 from formatting import get_base_embed, get_title_embed, get_booster_embed, get_streak_embed, get_firedust_embed, \
@@ -674,8 +674,14 @@ class FameBot:
                 else:
                     txt += '???\n'
 
+            rarity_xp, points_factor = RARITY_XP.get(rarity), RARITY_POINTS.get(rarity, None)
+            bonus_descr = ' '
+            if rarity_xp > 0:
+                bonus_descr += f'+{rarity_xp}xp'
+            elif points_factor is not None:
+                bonus_descr += f'+{floor((points_factor+.0004-1)*100)}% Points boost'
             embed.add_field(
-                name=' '.join([s.capitalize() for s in rarity.lower().split('_')]) + f' +{RARITY_XP.get(rarity)}xp' +
+                name=' '.join([s.capitalize() for s in rarity.lower().split('_')]) + bonus_descr +
                      (f' (Upgrade Cost: {example_title.upgrade_cost} :sparkles: Firedust)' if example_title.is_upgradable else ''),
                 value=txt,
                 inline=False)

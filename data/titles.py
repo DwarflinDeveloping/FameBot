@@ -29,7 +29,7 @@ RARITY_XP = {
 }
 
 RARITY_POINTS = {
-    'SEASONAL': 0
+    'SEASONAL': 1.25
 }
 
 RARITY_CHANCES = {
