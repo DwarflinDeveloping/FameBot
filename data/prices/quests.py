@@ -387,3 +387,9 @@ S2_W1_DATA = {
     'firedust_shop': (':sparkles: Shopping Spree', 'Purchase boosters worth 5,000 :sparkles: Fire Dust', 5000),
     'firepower_master': (':thunder_cloud_rain: Master of Disaster', 'Use 10 Masters Firepowers', 10),
 }
+
+S2_W2_DATA = {
+    'coins': (':coin: Money Hoarder', 'Obtain 3,000 :coin: BotCoins', 3000),
+    'sellout': (':shopping_bags: Sellout', 'Sell firepowers worth 3,000 :sparkles: Fire Dust', 3000),
+    'firepower_general': (':fire: On fire', 'Activate 50 Firepowers', 10),
+}

@@ -21,7 +21,7 @@ from data import load_app_data, save_game_data, flags_dir, users_dir, clear_data
     PV_PRESET, make_dirs, load_game_data, save_app_data
 from data.boosters import RoleUpBooster, Booster, boosters, booster_names, booster_name_to_cls
 from data.prices.giveaways import Giveaway, StreakReward
-from data.prices.quests import S2_W1_DATA
+from data.prices.quests import S2_W2_DATA
 from data.recaps import save_data, FameRecap
 from data.resources import get_legacy_path, get_legacy_banner, get_flag, format_embed
 from data.titles import RARITY_CHANCES, Title, RARITY_XP, RARITY_POINTS
@@ -376,7 +376,7 @@ class FameBot:
     def do_vote(self, user: FameUser, alpha2: str, votes_count: int, flare_applies: bool = True,
                 booster_applies: bool = True, gives_xp: bool = True) -> Tuple[int, int]:
         prev_order = (self.get_order(POINTS), self.get_order(VOTES))
-        old_level = user.level
+        old_level, old_coins = user.level, user.total_coins
 
         points_gained, xp_gained = user.do_vote(votes_count, alpha2, self.daily_boosted_countries, self.daily_boost_factor, flare_applies, booster_applies, gives_xp)
 
@@ -386,10 +386,14 @@ class FameBot:
             recap.save()
 
         new_order = (self.get_order(POINTS), self.get_order(VOTES))
-        new_level = user.level
+        new_level, new_coins = user.level, user.total_coins
         self.update_recap_ranks(prev_order, new_order)
         if old_level != new_level or user.total_votes == 1:
             self.role_checks.append(user.user_id)
+        if old_coins != new_coins:
+            coins_diff = new_coins-old_coins
+            if 'coins' in self.seasonal_quests:
+                self.seasonal_quests['coins'] += coins_diff
 
         special_title = Title('Denis the Menace', 'SPECIAL')
         if not user.has_title(special_title.name) and user.total_votes >= 10_000:
@@ -583,7 +587,7 @@ class FameBot:
         return {'embed': embed, 'view': DetailView()}
 
     def update_seasonal_quest_embed(self, seasonal_id: str, embed: Embed) -> Embed:
-        title, descr, needed = S2_W1_DATA.get(seasonal_id)
+        title, descr, needed = S2_W2_DATA.get(seasonal_id)
         progress = self.seasonal_quests[seasonal_id]
         embed.add_field(
             name=title,
@@ -638,6 +642,9 @@ class FameBot:
                         return
                     boo = Booster.from_name(select.values[0])()
                     fame_user.activate_booster(boo)
+
+                    if 'firepower_general' in self.seasonal_quests:
+                        self.seasonal_quests['firepower_general'] += 1
 
                     if 'firepower_master' in self.seasonal_quests and boo.name == 'Masters Firepower':
                         self.seasonal_quests['firepower_master'] += 1
@@ -776,7 +783,7 @@ class FameBot:
                         disequipped_title = self2.fame_user.get_title(title_name)
                         await interaction.response.send_message(embed=get_base_embed(
                             self2.ctx.user, f'{disequipped_title.name} disequipped',
-                            description='Equip a new title in the free slot to gain more **:coin: BotCoins**'
+                            description='Equip a new title in the free slot to gain more **:coin: BotCoins**',
                         ))
                         await self2.ctx.edit(**self.title_equip_args(self2.ctx))
 
@@ -1287,7 +1294,7 @@ class FameBot:
         )
         @default_permissions(administrator=True)
         async def gen_seasonal_quests_cmd(ctx: ApplicationContext):
-            self.game_data['seasonal_quests'] = {key: 0 for key in S2_W1_DATA.keys()}
+            self.game_data['seasonal_quests'] = {key: 0 for key in S2_W2_DATA.keys()}
 
         @self.bot.slash_command(
             name='gen_flare',
@@ -1656,6 +1663,8 @@ class FameBot:
                 return
 
             firedust_amount = amount * booster_cls.firedust_cost
+            if 'sellout' in self.seasonal_quests:
+                self.seasonal_quests['sellout'] += firedust_amount
             fame_user.data['boosters'][booster_cls.name] -= amount
             fame_user.scavenged_firedust += firedust_amount
 
